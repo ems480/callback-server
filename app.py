@@ -98,6 +98,8 @@ def initiate_payment():
         data = request.json
         phone = data.get("phone")
         amount = data.get("amount")
+        correspondent = data.get("correspondent", "MTN_MOMO_ZMB")  # default MTN
+        currency = data.get("currency", "ZMW")  # default ZMW
 
         if not phone or not amount:
             return jsonify({"error": "Missing phone or amount"}), 400
@@ -108,8 +110,8 @@ def initiate_payment():
         payload = {
             "depositId": deposit_id,
             "amount": str(amount),
-            "currency": "ZMW",
-            "correspondent": "MTN_MOMO_ZMB",  # TODO: make dynamic
+            "currency": currency,
+            "correspondent": correspondent,
             "payer": {"type": "MSISDN", "address": {"value": phone}},
             "customerTimestamp": customer_timestamp,
             "statementDescription": "StudyCraftPay",
@@ -127,7 +129,7 @@ def initiate_payment():
         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
         result = resp.json()
 
-        # Save initial record to DB
+        # Save to DB
         db = get_db()
         cur = db.cursor()
         cur.execute("""
@@ -138,9 +140,9 @@ def initiate_payment():
             deposit_id,
             result.get("status", "PENDING"),
             float(amount),
-            "ZMW",
+            currency,
             phone,
-            None,
+            correspondent,
             None,
             None,
             None,
@@ -151,9 +153,10 @@ def initiate_payment():
 
         return jsonify({"depositId": deposit_id, **result}), 200
 
-    except Exception:
+    except Exception as e:
         logger.exception("Error initiating payment")
         return jsonify({"error": "Internal server error"}), 500
+
 
 
 # -------------------------
@@ -256,3 +259,4 @@ if __name__ == '__main__':
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
