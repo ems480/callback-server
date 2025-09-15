@@ -118,6 +118,8 @@ def initiate_payment():
             "Authorization": f"Bearer {API_TOKEN}",
             "Content-Type": "application/json"
         }
+        
+        logger.info(f"Using API_MODE={API_MODE}, API_TOKEN startswith={str(API_TOKEN)[:10]}, URL={PAWAPAY_URL}")
 
         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
         result = resp.json()
@@ -251,3 +253,4 @@ if __name__ == '__main__':
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
