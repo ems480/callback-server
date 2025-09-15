@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()  # Load .env file
+load_dotenv()  # Load .env file locally
 
 from flask import Flask, request, jsonify, g
 import os
@@ -24,6 +24,10 @@ if API_MODE == "live":
 else:
     API_TOKEN = SANDBOX_API_TOKEN
 
+PAWAPAY_URL = "https://api.sandbox.pawapay.io/deposits" if API_MODE == "sandbox" \
+    else "https://api.pawapay.io/deposits"
+
+
 # -------------------------
 # DATABASE CONFIGURATION
 # -------------------------
@@ -33,18 +37,7 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# API_TOKEN = os.environ.get("PAWAPAY_API_TOKEN")  # 🔒 keep safe in env vars
-PAWAPAY_URL = "https://api.sandbox.pawapay.io/deposits"
-
-
-def get_db():
-    db = getattr(g, "_database", None)
-    if db is None:
-        db = g._database = sqlite3.connect(DATABASE)
-        db.row_factory = sqlite3.Row
-    return db
-
-
+# Ensure DB initialized at startup (for Render)
 def init_db():
     """Create transactions table if it does not exist."""
     db = sqlite3.connect(DATABASE)
@@ -68,6 +61,17 @@ def init_db():
     db.commit()
     db.close()
 
+with app.app_context():
+    init_db()  # 🔥 always run at startup
+
+
+def get_db():
+    db = getattr(g, "_database", None)
+    if db is None:
+        db = g._database = sqlite3.connect(DATABASE)
+        db.row_factory = sqlite3.Row
+    return db
+
 
 @app.teardown_appcontext
 def close_connection(exception):
@@ -81,6 +85,7 @@ def close_connection(exception):
 # -------------------------
 @app.route('/')
 def home():
+    logger.info(f"Using API_MODE={API_MODE}, API_TOKEN startswith={str(API_TOKEN)[:10]}, URL={PAWAPAY_URL}")
     return "PawaPay Callback Receiver is running ✅"
 
 
@@ -104,7 +109,7 @@ def initiate_payment():
             "depositId": deposit_id,
             "amount": str(amount),
             "currency": "ZMW",
-            "correspondent": "MTN_MOMO_ZMB",  # TODO: allow dynamic correspondent
+            "correspondent": "MTN_MOMO_ZMB",  # TODO: make dynamic
             "payer": {"type": "MSISDN", "address": {"value": phone}},
             "customerTimestamp": customer_timestamp,
             "statementDescription": "StudyCraftPay",
@@ -115,11 +120,9 @@ def initiate_payment():
         }
 
         headers = {
-            "Authorization": f"Bearer {SANDBOX_API_TOKEN}",
+            "Authorization": f"Bearer {API_TOKEN}",
             "Content-Type": "application/json"
         }
-        
-        logger.info(f"Using API_MODE={API_MODE}, API_TOKEN startswith={str(SANDBOX_API_TOKEN)[:10]}, URL={PAWAPAY_URL}")
 
         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
         result = resp.json()
@@ -148,7 +151,7 @@ def initiate_payment():
 
         return jsonify({"depositId": deposit_id, **result}), 200
 
-    except Exception as e:
+    except Exception:
         logger.exception("Error initiating payment")
         return jsonify({"error": "Internal server error"}), 500
 
@@ -200,7 +203,7 @@ def deposit_callback():
         db.commit()
         return jsonify({"received": True}), 200
 
-    except Exception as e:
+    except Exception:
         logger.exception("Error handling deposit callback")
         return jsonify({"error": "Internal server error"}), 500
 
@@ -247,12 +250,9 @@ def get_transaction(deposit_id):
 
 
 # -------------------------
-# RUN SERVER
+# RUN SERVER LOCALLY
 # -------------------------
 if __name__ == '__main__':
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
-
-
