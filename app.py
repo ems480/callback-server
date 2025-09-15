@@ -33,7 +33,7 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-API_TOKEN = os.environ.get("PAWAPAY_API_TOKEN")  # 🔒 keep safe in env vars
+# API_TOKEN = os.environ.get("PAWAPAY_API_TOKEN")  # 🔒 keep safe in env vars
 PAWAPAY_URL = "https://api.sandbox.pawapay.io/deposits"
 
 
@@ -253,4 +253,5 @@ if __name__ == '__main__':
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
