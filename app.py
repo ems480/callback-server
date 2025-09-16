@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()  # Load .env file locally
+load_dotenv()
 
 from flask import Flask, request, jsonify, g
 import os
@@ -7,41 +7,34 @@ import logging
 import sqlite3
 import json
 import requests
-from datetime import datetime
 import uuid
+from datetime import datetime
 
 # -------------------------
-# API CONFIGURATION
+# CONFIG
 # -------------------------
-API_MODE = os.getenv("API_MODE", "sandbox")  # default sandbox
+API_MODE = os.getenv("API_MODE", "sandbox")  # sandbox | live
 SANDBOX_API_TOKEN = os.getenv("SANDBOX_API_TOKEN")
 LIVE_API_TOKEN = os.getenv("LIVE_API_TOKEN")
 
-# Decide which one to use
 if API_MODE == "live":
     API_TOKEN = LIVE_API_TOKEN
+    PAWAPAY_URL = "https://api.pawapay.io/deposits"
 else:
     API_TOKEN = SANDBOX_API_TOKEN
+    PAWAPAY_URL = "https://api.sandbox.pawapay.io/deposits"
 
-PAWAPAY_URL = (
-    "https://api.sandbox.pawapay.io/deposits"
-    if API_MODE == "sandbox"
-    else "https://api.pawapay.io/deposits"
-)
-
-
-# -------------------------
-# DATABASE CONFIGURATION
-# -------------------------
 DATABASE = os.path.join(os.path.dirname(__file__), "transactions.db")
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Ensure DB initialized at startup (for Render)
+
+# -------------------------
+# DATABASE
+# -------------------------
 def init_db():
-    """Create transactions table if it does not exist."""
     db = sqlite3.connect(DATABASE)
     cur = db.cursor()
     cur.execute("""
@@ -63,8 +56,9 @@ def init_db():
     db.commit()
     db.close()
 
+
 with app.app_context():
-    init_db()  # 🔥 always run at startup
+    init_db()
 
 
 def get_db():
@@ -83,18 +77,16 @@ def close_connection(exception):
 
 
 # -------------------------
-# HEALTHCHECK
+# ROUTES
 # -------------------------
-@app.route('/')
+@app.route("/")
 def home():
-    logger.info(f"Using API_MODE={API_MODE}, API_TOKEN startswith={str(API_TOKEN)[:10]}, URL={PAWAPAY_URL}")
-    return "PawaPay Callback Receiver is running ✅"
+    return "PawaPay Callback Receiver ✅"
 
 
-# -------------------------
-# INITIATE PAYMENT (App → Server → PawaPay)
-# -------------------------@app.route('/initiate-payment', methods=['POST'])
+@app.route("/initiate-payment", methods=["POST"])
 def initiate_payment():
+    """App → Server → PawaPay"""
     try:
         data = request.json
         phone = data.get("phone")
@@ -105,13 +97,11 @@ def initiate_payment():
         if not phone or not amount:
             return jsonify({"error": "Missing phone or amount"}), 400
 
-        # 🔑 Generate unique depositId
         deposit_id = str(uuid.uuid4())
-
         customer_timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
         payload = {
-            "depositId": deposit_id,   # ✅ REQUIRED
+            "depositId": deposit_id,
             "amount": str(amount),
             "currency": currency,
             "correspondent": correspondent,
@@ -119,6 +109,7 @@ def initiate_payment():
             "customerTimestamp": customer_timestamp,
             "statementDescription": "StudyCraftPay",
             "metadata": [
+                {"fieldName": "orderId", "fieldValue": "ORD-" + deposit_id},
                 {"fieldName": "customerId", "fieldValue": phone, "isPII": True}
             ]
         }
@@ -128,49 +119,16 @@ def initiate_payment():
             "Content-Type": "application/json"
         }
 
-        # 🔥 Send to PawaPay
         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
         result = resp.json()
-
-        if resp.status_code not in (200, 201):
-            logger.error(f"PawaPay error: {resp.status_code} - {result}")
-            return jsonify({"error": "Failed to initiate payment", "details": result}), 400
-
-        # Save to DB (initial record)
-        db = get_db()
-        cur = db.cursor()
-        cur.execute("""
-            INSERT OR REPLACE INTO transactions 
-            (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId, failureCode, failureMessage, metadata, received_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            deposit_id,
-            result.get("status", "PENDING"),
-            float(amount),
-            currency,
-            phone,
-            correspondent,
-            None,
-            None,
-            None,
-            json.dumps(payload.get("metadata")),
-            datetime.utcnow().isoformat()
-        ))
-        db.commit()
-
-        # Return depositId to Kivy app
-        return jsonify({"depositId": deposit_id, **result}), 200
-
-    except Exception as e:
-        logger.exception("Error initiating payment")
-        return jsonify({"error": "Internal server error"}), 500
 
         # Save to DB
         db = get_db()
         cur = db.cursor()
         cur.execute("""
-            INSERT OR REPLACE INTO transactions 
-            (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId, failureCode, failureMessage, metadata, received_at)
+            INSERT OR REPLACE INTO transactions
+            (depositId, status, amount, currency, phoneNumber, provider,
+             providerTransactionId, failureCode, failureMessage, metadata, received_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             deposit_id,
@@ -194,12 +152,9 @@ def initiate_payment():
         return jsonify({"error": "Internal server error"}), 500
 
 
-
-# -------------------------
-# DEPOSIT CALLBACK RECEIVER
-# -------------------------
-@app.route('/callback/deposit', methods=['POST'])
+@app.route("/callback/deposit", methods=["POST"])
 def deposit_callback():
+    """PawaPay → Server (asynchronous callback)"""
     try:
         data = request.get_json()
         if not data:
@@ -219,12 +174,12 @@ def deposit_callback():
         failure_message = failure_reason.get("failureMessage")
         metadata = data.get("metadata")
 
-        # Persist callback to DB
         db = get_db()
         cur = db.cursor()
         cur.execute("""
-            INSERT OR REPLACE INTO transactions 
-            (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId, failureCode, failureMessage, metadata, received_at)
+            INSERT OR REPLACE INTO transactions
+            (depositId, status, amount, currency, phoneNumber, provider,
+             providerTransactionId, failureCode, failureMessage, metadata, received_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             deposit_id,
@@ -247,30 +202,9 @@ def deposit_callback():
         return jsonify({"error": "Internal server error"}), 500
 
 
-# -------------------------
-# POLL / GET STATUS BY DEPOSIT ID
-# -------------------------
-@app.route('/deposit_status/<deposit_id>', methods=['GET'])
-def get_deposit_status(deposit_id):
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("SELECT * FROM transactions WHERE depositId = ?", (deposit_id,))
-    row = cur.fetchone()
-    if not row:
-        return jsonify({"status": None, "message": "Deposit not found"}), 404
-
-    result = {k: row[k] for k in row.keys()}
-    if result.get("metadata"):
-        try:
-            result["metadata"] = json.loads(result["metadata"])
-        except Exception:
-            pass
-
-    return jsonify(result), 200
-
-
-@app.route('/transactions/<deposit_id>', methods=['GET'])
+@app.route("/transactions/<deposit_id>", methods=["GET"])
 def get_transaction(deposit_id):
+    """App polls status"""
     db = get_db()
     cur = db.cursor()
     cur.execute("SELECT * FROM transactions WHERE depositId = ?", (deposit_id,))
@@ -284,14 +218,13 @@ def get_transaction(deposit_id):
             result["metadata"] = json.loads(result["metadata"])
         except Exception:
             pass
-
     return jsonify(result), 200
 
 
 # -------------------------
-# RUN SERVER LOCALLY
+# MAIN
 # -------------------------
-if __name__ == '__main__':
+if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
@@ -558,6 +491,7 @@ if __name__ == '__main__':
 #     init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
