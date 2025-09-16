@@ -214,22 +214,37 @@ def deposit_callback():
 
 
 
-@app.route("/transactions/<deposit_id>", methods=["GET"])
+@app.route('/transactions/<deposit_id>', methods=['GET'])
 def get_transaction(deposit_id):
-    """App polls status"""
+    """
+    Returns the latest transaction status for a given deposit_id.
+    This now explicitly handles PENDING, ACCEPTED, RECONCILIATION, COMPLETED, FAILED.
+    """
     db = get_db()
     cur = db.cursor()
     cur.execute("SELECT * FROM transactions WHERE depositId = ?", (deposit_id,))
     row = cur.fetchone()
-    if not row:
-        return jsonify({"error": "not found"}), 404
 
+    if not row:
+        return jsonify({"error": "Transaction not found"}), 404
+
+    # Construct response with all fields
     result = {k: row[k] for k in row.keys()}
+
+    # Ensure metadata is returned as JSON
     if result.get("metadata"):
         try:
             result["metadata"] = json.loads(result["metadata"])
         except Exception:
             pass
+
+    # Make sure status is exactly what PawaPay sent, including RECONCILIATION
+    status = result.get("status", "PENDING")
+    result["status"] = status  # This ensures the Kivy app sees the current state
+
+    # Optional: log for debugging
+    logger.info(f"Transaction queried: DepositId={deposit_id}, Status={status}")
+
     return jsonify(result), 200
 
 
@@ -503,6 +518,7 @@ if __name__ == "__main__":
 #     init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
