@@ -8,7 +8,7 @@ import sqlite3
 import json
 import requests
 from datetime import datetime
-
+import uuid
 
 # -------------------------
 # API CONFIGURATION
@@ -93,22 +93,25 @@ def home():
 
 # -------------------------
 # INITIATE PAYMENT (App → Server → PawaPay)
-# -------------------------
-@app.route('/initiate-payment', methods=['POST'])
+# -------------------------@app.route('/initiate-payment', methods=['POST'])
 def initiate_payment():
     try:
         data = request.json
         phone = data.get("phone")
         amount = data.get("amount")
-        correspondent = data.get("correspondent", "MTN_MOMO_ZMB")  # default MTN
-        currency = data.get("currency", "ZMW")  # default ZMW
+        correspondent = data.get("correspondent", "MTN_MOMO_ZMB")
+        currency = data.get("currency", "ZMW")
 
         if not phone or not amount:
             return jsonify({"error": "Missing phone or amount"}), 400
 
+        # 🔑 Generate unique depositId
+        deposit_id = str(uuid.uuid4())
+
         customer_timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
         payload = {
+            "depositId": deposit_id,   # ✅ REQUIRED
             "amount": str(amount),
             "currency": currency,
             "correspondent": correspondent,
@@ -133,10 +136,34 @@ def initiate_payment():
             logger.error(f"PawaPay error: {resp.status_code} - {result}")
             return jsonify({"error": "Failed to initiate payment", "details": result}), 400
 
-        # ✅ Use PawaPay's depositId
-        deposit_id = result.get("depositId")
-        if not deposit_id:
-            return jsonify({"error": "No depositId returned from PawaPay"}), 500
+        # Save to DB (initial record)
+        db = get_db()
+        cur = db.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO transactions 
+            (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId, failureCode, failureMessage, metadata, received_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            deposit_id,
+            result.get("status", "PENDING"),
+            float(amount),
+            currency,
+            phone,
+            correspondent,
+            None,
+            None,
+            None,
+            json.dumps(payload.get("metadata")),
+            datetime.utcnow().isoformat()
+        ))
+        db.commit()
+
+        # Return depositId to Kivy app
+        return jsonify({"depositId": deposit_id, **result}), 200
+
+    except Exception as e:
+        logger.exception("Error initiating payment")
+        return jsonify({"error": "Internal server error"}), 500
 
         # Save to DB
         db = get_db()
@@ -531,6 +558,7 @@ if __name__ == '__main__':
 #     init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
