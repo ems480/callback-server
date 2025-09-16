@@ -152,9 +152,8 @@ def initiate_payment():
         return jsonify({"error": "Internal server error"}), 500
 
 
-@app.route("/callback/deposit", methods=["POST"])
+@app.route('/callback/deposit', methods=['POST'])
 def deposit_callback():
-    """PawaPay → Server (asynchronous callback)"""
     try:
         data = request.get_json()
         if not data:
@@ -174,12 +173,23 @@ def deposit_callback():
         failure_message = failure_reason.get("failureMessage")
         metadata = data.get("metadata")
 
+        # 🔥 LOG FULL CALLBACK
+        logger.info("=== CALLBACK RECEIVED ===")
+        logger.info(f"DepositId: {deposit_id}")
+        logger.info(f"Status: {status}")
+        logger.info(f"Amount: {amount} {currency}")
+        logger.info(f"Phone: {phone_number}, Provider: {provider}")
+        logger.info(f"ProviderTxn: {provider_txn}")
+        logger.info(f"Failure: {failure_code} - {failure_message}")
+        logger.info(f"Metadata: {metadata}")
+        logger.info("=========================")
+
+        # Persist callback to DB
         db = get_db()
         cur = db.cursor()
         cur.execute("""
-            INSERT OR REPLACE INTO transactions
-            (depositId, status, amount, currency, phoneNumber, provider,
-             providerTransactionId, failureCode, failureMessage, metadata, received_at)
+            INSERT OR REPLACE INTO transactions 
+            (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId, failureCode, failureMessage, metadata, received_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             deposit_id,
@@ -195,11 +205,13 @@ def deposit_callback():
             datetime.utcnow().isoformat()
         ))
         db.commit()
+
         return jsonify({"received": True}), 200
 
     except Exception:
         logger.exception("Error handling deposit callback")
         return jsonify({"error": "Internal server error"}), 500
+
 
 
 @app.route("/transactions/<deposit_id>", methods=["GET"])
@@ -491,6 +503,7 @@ if __name__ == "__main__":
 #     init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
