@@ -890,6 +890,30 @@ def payout_callback():
         logger.exception("Error handling payout callback")
         return jsonify({"error": "Internal server error"}), 500
 
+@app.route("/api/loans", methods=["GET"])
+def get_all_loans():
+    """
+    Admin endpoint: Get all loans for disbursement dashboard.
+    """
+    try:
+        db = get_db()
+        cur = db.cursor()
+        cur.execute("SELECT * FROM loans")
+        rows = cur.fetchall()
+
+        loans = []
+        for row in rows:
+            loans.append({
+                "loan_id": row["loan_id"],
+                "user_id": row["user_id"],
+                "amount": row["amount"],
+                "status": row["status"],
+                "requested_at": row["requested_at"]
+            })
+
+        return jsonify({"loans": loans}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/payouts/<payout_id>', methods=['GET'])
 def get_payout(payout_id):
@@ -918,5 +942,6 @@ if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
