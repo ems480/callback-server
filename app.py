@@ -541,11 +541,11 @@ LIVE_API_TOKEN = os.getenv("LIVE_API_TOKEN")
 
 if API_MODE == "live":
     API_TOKEN = LIVE_API_TOKEN
-    PAWAPAY_URL = "https://api.pawapay.io/deposits"
+    PAWAPAY_DEPOSITS_URL = "https://api.pawapay.io/deposits"
     PAWAPAY_PAYOUTS_URL = "https://api.pawapay.io/v2/payouts"
 else:
     API_TOKEN = SANDBOX_API_TOKEN
-    PAWAPAY_URL = "https://api.sandbox.pawapay.io/deposits"
+    PAWAPAY_DEPOSITS_URL = "https://api.sandbox.pawapay.io/deposits"
     PAWAPAY_PAYOUTS_URL = "https://api.sandbox.pawapay.io/v2/payouts"
 
 DATABASE = os.path.join(os.path.dirname(__file__), "transactions.db")
@@ -918,4 +918,5 @@ if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
