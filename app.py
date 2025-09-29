@@ -248,6 +248,77 @@ def get_transaction(deposit_id):
 
     return jsonify(result), 200
 
+# -------------------------
+# INITIATE INVESTMENT
+# -------------------------
+@app.route('/api/investments/initiate', methods=['POST'])
+def initiate_investment():
+    try:
+        data = request.json
+        phone = data.get("phone")
+        amount = data.get("amount")
+        correspondent = data.get("correspondent", "MTN_MOMO_ZMB")
+        currency = data.get("currency", "ZMW")
+        user_id = data.get("user_id", "unknown")
+
+        if not phone or not amount:
+            return jsonify({"error": "Missing phone or amount"}), 400
+
+        deposit_id = str(uuid.uuid4())
+        customer_timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        payload = {
+            "depositId": deposit_id,
+            "amount": str(amount),
+            "currency": currency,
+            "correspondent": correspondent,
+            "payer": {"type": "MSISDN", "address": {"value": phone}},
+            "customerTimestamp": customer_timestamp,
+            "statementDescription": "Investment",
+            "metadata": [
+                {"fieldName": "purpose", "fieldValue": "investment"},
+                {"fieldName": "userId", "fieldValue": str(user_id), "isPII": True}
+            ]
+        }
+
+        headers = {
+            "Authorization": f"Bearer {API_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
+        result = resp.json()
+
+        # Save initial record to DB
+        db = get_db()
+        cur = db.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO transactions 
+            (depositId, status, amount, currency, phoneNumber, provider, 
+             providerTransactionId, failureCode, failureMessage, metadata, 
+             received_at, type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            deposit_id,
+            result.get("status", "PENDING"),
+            float(amount),
+            currency,
+            phone,
+            None,
+            None,
+            None,
+            None,
+            json.dumps(payload.get("metadata")),
+            datetime.utcnow().isoformat(),
+            "investment"
+        ))
+        db.commit()
+
+        return jsonify({"depositId": deposit_id, "status": "PENDING"}), 200
+
+    except Exception:
+        logger.exception("Error initiating investment")
+        return jsonify({"error": "Internal server error"}), 500
 
 # -------------------------
 # RUN SERVER LOCALLY
@@ -256,6 +327,9 @@ if __name__ == '__main__':
     init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
+
+
 # from dotenv import load_dotenv
 # load_dotenv()
 
@@ -569,4 +643,5 @@ if __name__ == '__main__':
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
