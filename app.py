@@ -358,6 +358,27 @@ def get_investment_status(deposit_id):
         except: pass
     return jsonify(res), 200
 
+#+++++++++++++++++++++++++++++++++++++++++++++++++
+#INVESTMENT LIST
+@app.route("/api/investments/user/<user_id>", methods=["GET"])
+def get_user_investments(user_id):
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM transactions WHERE type='investment' AND metadata LIKE ? ORDER BY received_at DESC",
+        (f'%{user_id}%',)
+    ).fetchall()
+    
+    results = []
+    for row in rows:
+        res = {k: row[k] for k in row.keys()}
+        if res.get("metadata"):
+            try:
+                res["metadata"] = json.loads(res["metadata"])
+            except:
+                pass
+        results.append(res)
+    
+    return jsonify(results), 200
 
 
 # -------------------------
@@ -1015,6 +1036,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
