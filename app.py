@@ -203,6 +203,7 @@ def initiate_investment():
 
         deposit_id = str(uuid.uuid4())
         customer_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
         payload = {
             "depositId": deposit_id,
             "amount": str(amount),
@@ -219,7 +220,17 @@ def initiate_investment():
 
         headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
-        result = resp.json()
+
+        try:
+            result = resp.json()
+        except Exception:
+            logger.error(f"PawaPay response not JSON: {resp.text}")
+            return jsonify({"error": "Invalid response from PawaPay"}), 502
+
+        logger.info(f"PawaPay response: {result}")
+
+        # Ensure 'status' is safe
+        status = result.get("status", "PENDING")
 
         db = get_db()
         db.execute("""
@@ -229,7 +240,7 @@ def initiate_investment():
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             deposit_id,
-            result.get("status", "PENDING"),
+            status,
             float(amount),
             currency,
             phone,
@@ -239,11 +250,68 @@ def initiate_investment():
             "investment"
         ))
         db.commit()
-        return jsonify({"depositId": deposit_id, "status": "PENDING"}), 200
+        return jsonify({"depositId": deposit_id, "status": status}), 200
 
-    except Exception:
+    except Exception as e:
         logger.exception("Investment initiation error")
-        return jsonify({"error": "Internal server error"}), 500
+        return jsonify({"error": str(e)}), 500
+
+# @app.route("/api/investments/initiate", methods=["POST"])
+# def initiate_investment():
+#     try:
+#         data = request.json
+#         phone = data.get("phone")
+#         amount = data.get("amount")
+#         correspondent = data.get("correspondent", "MTN_MOMO_ZMB")
+#         currency = data.get("currency", "ZMW")
+#         user_id = data.get("user_id", "unknown")
+
+#         if not phone or not amount:
+#             return jsonify({"error": "Missing phone or amount"}), 400
+
+#         deposit_id = str(uuid.uuid4())
+#         customer_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+#         payload = {
+#             "depositId": deposit_id,
+#             "amount": str(amount),
+#             "currency": currency,
+#             "correspondent": correspondent,
+#             "payer": {"type": "MSISDN", "address": {"value": phone}},
+#             "customerTimestamp": customer_ts,
+#             "statementDescription": "Investment",
+#             "metadata": [
+#                 {"fieldName": "purpose", "fieldValue": "investment"},
+#                 {"fieldName": "userId", "fieldValue": str(user_id), "isPII": True},
+#             ],
+#         }
+
+#         headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
+#         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
+#         result = resp.json()
+
+#         db = get_db()
+#         db.execute("""
+#             INSERT OR REPLACE INTO transactions
+#             (depositId,status,amount,currency,phoneNumber,provider,
+#              providerTransactionId,failureCode,failureMessage,metadata,received_at,type)
+#             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+#         """, (
+#             deposit_id,
+#             result.get("status", "PENDING"),
+#             float(amount),
+#             currency,
+#             phone,
+#             None, None, None, None,
+#             json.dumps(payload["metadata"]),
+#             datetime.utcnow().isoformat(),
+#             "investment"
+#         ))
+#         db.commit()
+#         return jsonify({"depositId": deposit_id, "status": "PENDING"}), 200
+
+#     except Exception:
+#         logger.exception("Investment initiation error")
+#         return jsonify({"error": "Internal server error"}), 500
 
 @app.route("/api/investments/<deposit_id>", methods=["GET"])
 def get_investment_status(deposit_id):
@@ -917,6 +985,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
