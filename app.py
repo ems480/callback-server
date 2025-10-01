@@ -260,26 +260,7 @@ def get_investment_status(deposit_id):
         except: pass
     return jsonify(res), 200
 
-@app.route("/api/investments/history", methods=["GET"])
-def get_investment_history():
-    try:
-        db = get_db()
-        rows = db.execute(
-            "SELECT * FROM transactions WHERE type='investment' ORDER BY received_at DESC"
-        ).fetchall()
-        history = []
-        for row in rows:
-            record = {k: row[k] for k in row.keys()}
-            if record.get("metadata"):
-                try:
-                    record["metadata"] = json.loads(record["metadata"])
-                except:
-                    pass
-            history.append(record)
-        return jsonify(history), 200
-    except Exception:
-        logger.exception("Error fetching investment history")
-        return jsonify({"error": "Internal server error"}), 500
+
 
 # -------------------------
 # RUN
@@ -936,6 +917,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
