@@ -28,10 +28,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def init_db():
-    """Ensure table exists and has a 'type' column."""
     db = sqlite3.connect(DATABASE)
     cur = db.cursor()
-    # Create table if not exists
     cur.execute("""
     CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,17 +43,18 @@ def init_db():
         failureCode TEXT,
         failureMessage TEXT,
         metadata TEXT,
-        received_at TEXT
+        received_at TEXT,
+        type TEXT DEFAULT 'payment',
+        userId TEXT
     )
     """)
-    # Ensure 'type' column exists (for distinguishing payments/investments)
     try:
-        cur.execute("ALTER TABLE transactions ADD COLUMN type TEXT DEFAULT 'payment'")
+        cur.execute("ALTER TABLE transactions ADD COLUMN userId TEXT")
     except sqlite3.OperationalError:
-        # Column already exists
         pass
     db.commit()
     db.close()
+
 
 # def init_db():
 #     """Ensure table exists and has a 'type' column."""
@@ -1036,6 +1035,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
