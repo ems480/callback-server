@@ -22,14 +22,14 @@ PAWAPAY_URL = (
 # -------------------------
 # DATABASE
 # -------------------------
-# DATABASE = os.path.join(os.path.dirname(__file__), "transactions.db")
+DATABASE = os.path.join(os.path.dirname(__file__), "transactions.db")
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # import sqlite3
 
-DATABASE = "transactions.db"
+# DATABASE = "transactions.db"
 
 def init_db():
     db = sqlite3.connect(DATABASE)
@@ -1501,6 +1501,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
