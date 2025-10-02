@@ -22,16 +22,20 @@ PAWAPAY_URL = (
 # -------------------------
 # DATABASE
 # -------------------------
-DATABASE = os.path.join(os.path.dirname(__file__), "transactions.db")
+# DATABASE = os.path.join(os.path.dirname(__file__), "transactions.db")
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# import sqlite3
+
+DATABASE = "transactions.db"
+
 def init_db():
     db = sqlite3.connect(DATABASE)
     cur = db.cursor()
-    
-    # Create table with ALL columns if it doesn't exist
+
+    # 1️⃣ Create table if not exists
     cur.execute("""
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,20 +54,21 @@ def init_db():
             user_id TEXT
         )
     """)
-    
-    # Attempt to add missing columns safely (for older DBs)
-    try:
+
+    # 2️⃣ Check existing columns
+    cur.execute("PRAGMA table_info(transactions)")
+    existing_columns = [row[1] for row in cur.fetchall()]
+
+    # 3️⃣ Add missing columns safely
+    if "metadata" not in existing_columns:
         cur.execute("ALTER TABLE transactions ADD COLUMN metadata TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
+    if "type" not in existing_columns:
         cur.execute("ALTER TABLE transactions ADD COLUMN type TEXT DEFAULT 'payment'")
-    except sqlite3.OperationalError:
-        pass
-    try:
+    if "user_id" not in existing_columns:
         cur.execute("ALTER TABLE transactions ADD COLUMN user_id TEXT")
-    except sqlite3.OperationalError:
-        pass
+
+    # 4️⃣ Optional: backfill old data if needed
+    # cur.execute("UPDATE transactions SET user_id = 'unknown' WHERE user_id IS NULL")
 
     db.commit()
     db.close()
@@ -1496,6 +1501,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
