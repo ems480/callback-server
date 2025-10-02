@@ -28,8 +28,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def init_db():
+    """
+    Create base table if missing, then ensure 'type' and 'userId' columns exist.
+    Also run a lightweight migration to backfill userId and type from metadata.
+    """
     db = sqlite3.connect(DATABASE)
     cur = db.cursor()
+
+    # Create a base table (without userId/type) if it doesn't exist yet
+    # We'll add missing columns below (ALTER TABLE) so existing DBs are upgraded safely.
     cur.execute("""
     CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,16 +50,100 @@ def init_db():
         failureCode TEXT,
         failureMessage TEXT,
         metadata TEXT,
-        received_at TEXT,
-        type TEXT DEFAULT 'payment',
-        userId TEXT
+        received_at TEXT
     )
     """)
-    try:
-        cur.execute("ALTER TABLE transactions ADD COLUMN userId TEXT")
-    except sqlite3.OperationalError:
-        pass
     db.commit()
+
+    # Inspect existing columns
+    cur.execute("PRAGMA table_info(transactions)")
+    cols_info = cur.fetchall()  # list of tuples; second element is column name
+    existing_cols = [r[1] for r in cols_info]
+
+    # Add 'type' column if missing
+    if "type" not in existing_cols:
+        try:
+            cur.execute("ALTER TABLE transactions ADD COLUMN type TEXT DEFAULT 'payment'")
+            logger.info("Added 'type' column to transactions table.")
+        except sqlite3.OperationalError as e:
+            logger.warning("Could not add 'type' column (may already exist): %s", e)
+
+    # Add 'userId' column if missing
+    if "userId" not in existing_cols:
+        try:
+            cur.execute("ALTER TABLE transactions ADD COLUMN userId TEXT")
+            logger.info("Added 'userId' column to transactions table.")
+        except sqlite3.OperationalError as e:
+            logger.warning("Could not add 'userId' column (may already exist): %s", e)
+
+    db.commit()
+
+    # Lightweight migration/backfill:
+    # - If metadata contains an entry with fieldName == 'userId', set userId column.
+    # - If metadata contains purpose == 'investment', set type = 'investment'.
+    try:
+        rows = cur.execute("SELECT depositId, metadata, type, userId FROM transactions").fetchall()
+        updates = []
+        for r in rows:
+            deposit_id = r[0]
+            metadata = r[1]
+            cur_type = r[2]
+            cur_user = r[3]
+            new_type = cur_type if cur_type else None
+            new_user = cur_user if cur_user else None
+            changed = False
+
+            if metadata:
+                try:
+                    meta_obj = json.loads(metadata)
+                except Exception:
+                    meta_obj = None
+
+                if isinstance(meta_obj, list):
+                    # metadata stored as list of dicts like [{"fieldName": "...", "fieldValue": "..."}]
+                    for entry in meta_obj:
+                        if not isinstance(entry, dict):
+                            continue
+                        fn = str(entry.get("fieldName") or "").lower()
+                        fv = entry.get("fieldValue")
+                        if fn == "userid" and fv and not new_user:
+                            new_user = str(fv)
+                            changed = True
+                        if fn == "purpose" and isinstance(fv, str):
+                            if fv.lower() == "investment" and new_type != "investment":
+                                new_type = "investment"
+                                changed = True
+                elif isinstance(meta_obj, dict):
+                    # possible alternate structures
+                    # try common keys
+                    if "userId" in meta_obj and not new_user:
+                        new_user = str(meta_obj.get("userId"))
+                        changed = True
+                    purpose = meta_obj.get("purpose") or meta_obj.get("fieldName")
+                    if purpose and isinstance(purpose, str) and purpose.lower() == "investment" and new_type != "investment":
+                        new_type = "investment"
+                        changed = True
+
+            # default type to 'payment' if still None
+            if new_type is None:
+                new_type = "payment"
+
+            # If any change, queue update
+            if changed or (cur_user is None and new_user is not None) or (cur_type is None and new_type):
+                updates.append((new_user, new_type, deposit_id))
+
+        # Apply updates
+        for (u, t, dep) in updates:
+            try:
+                cur.execute("UPDATE transactions SET userId = ?, type = ? WHERE depositId = ?", (u, t, dep))
+            except Exception as e:
+                logger.exception("Failed to update transaction %s: %s", dep, e)
+        if updates:
+            db.commit()
+            logger.info("Backfilled %d transactions with userId/type from metadata.", len(updates))
+    except Exception:
+        logger.exception("Error during migration/backfill pass")
+
     db.close()
 
 with app.app_context():
@@ -79,7 +170,7 @@ def home():
     return f"PawaPay Callback Receiver running ✅ (API_MODE={API_MODE})"
 
 # -------------------------
-# ORIGINAL PAYMENT ENDPOINTS
+# ORIGINAL PAYMENT ENDPOINTS (unchanged)
 # -------------------------
 @app.route("/initiate-payment", methods=["POST"])
 def initiate_payment():
@@ -1343,6 +1434,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
