@@ -28,32 +28,73 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def init_db():
-    """
-    Create base table if missing, then ensure 'type' and 'userId' columns exist.
-    Also run a lightweight migration to backfill userId and type from metadata.
-    """
     db = sqlite3.connect(DATABASE)
     cur = db.cursor()
-
-    # Create a base table (without userId/type) if it doesn't exist yet
-    # We'll add missing columns below (ALTER TABLE) so existing DBs are upgraded safely.
+    
+    # Create table with ALL columns if it doesn't exist
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        depositId TEXT UNIQUE,
-        status TEXT,
-        amount REAL,
-        currency TEXT,
-        phoneNumber TEXT,
-        provider TEXT,
-        providerTransactionId TEXT,
-        failureCode TEXT,
-        failureMessage TEXT,
-        metadata TEXT,
-        received_at TEXT
-    )
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            depositId TEXT UNIQUE,
+            status TEXT,
+            amount REAL,
+            currency TEXT,
+            phoneNumber TEXT,
+            provider TEXT,
+            providerTransactionId TEXT,
+            failureCode TEXT,
+            failureMessage TEXT,
+            metadata TEXT,
+            received_at TEXT,
+            type TEXT DEFAULT 'payment',
+            user_id TEXT
+        )
     """)
+    
+    # Attempt to add missing columns safely (for older DBs)
+    try:
+        cur.execute("ALTER TABLE transactions ADD COLUMN metadata TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cur.execute("ALTER TABLE transactions ADD COLUMN type TEXT DEFAULT 'payment'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cur.execute("ALTER TABLE transactions ADD COLUMN user_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     db.commit()
+    db.close()
+
+# def init_db():
+#     """
+#     Create base table if missing, then ensure 'type' and 'userId' columns exist.
+#     Also run a lightweight migration to backfill userId and type from metadata.
+#     """
+#     db = sqlite3.connect(DATABASE)
+#     cur = db.cursor()
+
+#     # Create a base table (without userId/type) if it doesn't exist yet
+#     # We'll add missing columns below (ALTER TABLE) so existing DBs are upgraded safely.
+#     cur.execute("""
+#     CREATE TABLE IF NOT EXISTS transactions (
+#         id INTEGER PRIMARY KEY AUTOINCREMENT,
+#         depositId TEXT UNIQUE,
+#         status TEXT,
+#         amount REAL,
+#         currency TEXT,
+#         phoneNumber TEXT,
+#         provider TEXT,
+#         providerTransactionId TEXT,
+#         failureCode TEXT,
+#         failureMessage TEXT,
+#         metadata TEXT,
+#         received_at TEXT
+#     )
+#     """)
+#     db.commit()
 
     # Inspect existing columns
     cur.execute("PRAGMA table_info(transactions)")
@@ -1455,6 +1496,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
