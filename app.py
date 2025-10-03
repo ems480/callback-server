@@ -267,7 +267,8 @@ def initiate_investment():
         amount = data.get("amount")
         correspondent = data.get("correspondent", "MTN_MOMO_ZMB")
         currency = data.get("currency", "ZMW")
-        user_id = data.get("user_id", "unknown")
+        # user_id = data.get("user_id", "unknown")
+        user_id = data["user_id"]
 
         if not phone or not amount:
             return jsonify({"error": "Missing phone or amount"}), 400
@@ -1786,6 +1787,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
