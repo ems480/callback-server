@@ -195,17 +195,58 @@ def initiate_payment():
         return jsonify({"error": "Internal server error"}), 500
 
 
+# @app.route("/callback/deposit", methods=["POST"])
+# def deposit_callback():
+#     try:
+#         data = request.get_json(force=True)
+#         deposit_id = data.get("depositId")
+#         db = get_db()
+#         db.execute("""
+#             INSERT OR REPLACE INTO transactions
+#             (depositId,status,amount,currency,phoneNumber,provider,
+#              providerTransactionId,failureCode,failureMessage,metadata,received_at)
+#             VALUES (?,?,?,?,?,?,?,?,?,?,?)
+#         """, (
+#             deposit_id,
+#             data.get("status"),
+#             float(data.get("amount", 0)) if data.get("amount") else None,
+#             data.get("currency"),
+#             data.get("payer", {}).get("accountDetails", {}).get("phoneNumber"),
+#             data.get("payer", {}).get("accountDetails", {}).get("provider"),
+#             data.get("providerTransactionId"),
+#             data.get("failureReason", {}).get("failureCode"),
+#             data.get("failureReason", {}).get("failureMessage"),
+#             json.dumps(data.get("metadata")) if data.get("metadata") else None,
+#             datetime.utcnow().isoformat()
+#         ))
+#         db.commit()
+#         return jsonify({"received": True}), 200
+#     except Exception:
+#         logger.exception("Callback error")
+#         return jsonify({"error": "Internal server error"}), 500
+
 @app.route("/callback/deposit", methods=["POST"])
 def deposit_callback():
     try:
         data = request.get_json(force=True)
         deposit_id = data.get("depositId")
         db = get_db()
+
+        # ✅ Extract user_id from metadata if present
+        user_id = None
+        if "metadata" in data and data["metadata"]:
+            if isinstance(data["metadata"], dict):
+                user_id = data["metadata"].get("userId")
+            elif isinstance(data["metadata"], list):
+                for entry in data["metadata"]:
+                    if entry.get("fieldName", "").lower() == "userid":
+                        user_id = entry.get("fieldValue")
+
         db.execute("""
             INSERT OR REPLACE INTO transactions
             (depositId,status,amount,currency,phoneNumber,provider,
-             providerTransactionId,failureCode,failureMessage,metadata,received_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+             providerTransactionId,failureCode,failureMessage,metadata,received_at,user_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             deposit_id,
             data.get("status"),
@@ -217,14 +258,14 @@ def deposit_callback():
             data.get("failureReason", {}).get("failureCode"),
             data.get("failureReason", {}).get("failureMessage"),
             json.dumps(data.get("metadata")) if data.get("metadata") else None,
-            datetime.utcnow().isoformat()
+            datetime.utcnow().isoformat(),
+            user_id
         ))
         db.commit()
         return jsonify({"received": True}), 200
     except Exception:
         logger.exception("Callback error")
         return jsonify({"error": "Internal server error"}), 500
-
 
 @app.route("/deposit_status/<deposit_id>")
 def deposit_status(deposit_id):
@@ -1787,6 +1828,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
