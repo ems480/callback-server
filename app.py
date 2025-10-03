@@ -27,15 +27,13 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# import sqlite3
-
-# DATABASE = "transactions.db"
 
 def init_db():
+    """Initialize database and ensure schema consistency."""
     db = sqlite3.connect(DATABASE)
     cur = db.cursor()
 
-    # 1️⃣ Create table if not exists
+    # Create base table if missing
     cur.execute("""
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,89 +52,15 @@ def init_db():
             user_id TEXT
         )
     """)
-
-    # 2️⃣ Check existing columns
-    cur.execute("PRAGMA table_info(transactions)")
-    existing_columns = [row[1] for row in cur.fetchall()]
-
-    # 3️⃣ Add missing columns safely
-    if "metadata" not in existing_columns:
-        cur.execute("ALTER TABLE transactions ADD COLUMN metadata TEXT")
-    if "type" not in existing_columns:
-        cur.execute("ALTER TABLE transactions ADD COLUMN type TEXT DEFAULT 'payment'")
-    if "user_id" not in existing_columns:
-        cur.execute("ALTER TABLE transactions ADD COLUMN user_id TEXT")
-
-    # 4️⃣ Optional: backfill old data if needed
-    # cur.execute("UPDATE transactions SET user_id = 'unknown' WHERE user_id IS NULL")
-
-    db.commit()
-    db.close()
-
-# def init_db():
-#     """
-#     Create base table if missing, then ensure 'type' and 'userId' columns exist.
-#     Also run a lightweight migration to backfill userId and type from metadata.
-#     """
-#     db = sqlite3.connect(DATABASE)
-#     cur = db.cursor()
-
-#     # Create a base table (without userId/type) if it doesn't exist yet
-#     # We'll add missing columns below (ALTER TABLE) so existing DBs are upgraded safely.
-#     cur.execute("""
-#     CREATE TABLE IF NOT EXISTS transactions (
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         depositId TEXT UNIQUE,
-#         status TEXT,
-#         amount REAL,
-#         currency TEXT,
-#         phoneNumber TEXT,
-#         provider TEXT,
-#         providerTransactionId TEXT,
-#         failureCode TEXT,
-#         failureMessage TEXT,
-#         metadata TEXT,
-#         received_at TEXT
-#     )
-#     """)
-#     db.commit()
-
-    # Inspect existing columns
-    cur.execute("PRAGMA table_info(transactions)")
-    cols_info = cur.fetchall()  # list of tuples; second element is column name
-    existing_cols = [r[1] for r in cols_info]
-
-    # Add 'type' column if missing
-    if "type" not in existing_cols:
-        try:
-            cur.execute("ALTER TABLE transactions ADD COLUMN type TEXT DEFAULT 'payment'")
-            logger.info("Added 'type' column to transactions table.")
-        except sqlite3.OperationalError as e:
-            logger.warning("Could not add 'type' column (may already exist): %s", e)
-
-    # Add 'userId' column if missing
-    if "userId" not in existing_cols:
-        try:
-            cur.execute("ALTER TABLE transactions ADD COLUMN userId TEXT")
-            logger.info("Added 'userId' column to transactions table.")
-        except sqlite3.OperationalError as e:
-            logger.warning("Could not add 'userId' column (may already exist): %s", e)
-
     db.commit()
 
-    # Lightweight migration/backfill:
-    # - If metadata contains an entry with fieldName == 'userId', set userId column.
-    # - If metadata contains purpose == 'investment', set type = 'investment'.
+    # Ensure migration of old metadata-based userId/type
     try:
-        rows = cur.execute("SELECT depositId, metadata, type, userId FROM transactions").fetchall()
-        updates = []
+        rows = cur.execute("SELECT depositId, metadata, type, user_id FROM transactions").fetchall()
         for r in rows:
-            deposit_id = r[0]
-            metadata = r[1]
-            cur_type = r[2]
-            cur_user = r[3]
-            new_type = cur_type if cur_type else None
-            new_user = cur_user if cur_user else None
+            deposit_id, metadata, cur_type, cur_user = r
+            new_type = cur_type or "payment"
+            new_user = cur_user
             changed = False
 
             if metadata:
@@ -146,7 +70,6 @@ def init_db():
                     meta_obj = None
 
                 if isinstance(meta_obj, list):
-                    # metadata stored as list of dicts like [{"fieldName": "...", "fieldValue": "..."}]
                     for entry in meta_obj:
                         if not isinstance(entry, dict):
                             continue
@@ -160,53 +83,44 @@ def init_db():
                                 new_type = "investment"
                                 changed = True
                 elif isinstance(meta_obj, dict):
-                    # possible alternate structures
-                    # try common keys
                     if "userId" in meta_obj and not new_user:
                         new_user = str(meta_obj.get("userId"))
                         changed = True
-                    purpose = meta_obj.get("purpose") or meta_obj.get("fieldName")
+                    purpose = meta_obj.get("purpose")
                     if purpose and isinstance(purpose, str) and purpose.lower() == "investment" and new_type != "investment":
                         new_type = "investment"
                         changed = True
 
-            # default type to 'payment' if still None
-            if new_type is None:
-                new_type = "payment"
+            if changed or (cur_user is None and new_user) or (cur_type is None and new_type):
+                cur.execute("UPDATE transactions SET user_id=?, type=? WHERE depositId=?",
+                            (new_user, new_type, deposit_id))
 
-            # If any change, queue update
-            if changed or (cur_user is None and new_user is not None) or (cur_type is None and new_type):
-                updates.append((new_user, new_type, deposit_id))
-
-        # Apply updates
-        for (u, t, dep) in updates:
-            try:
-                cur.execute("UPDATE transactions SET userId = ?, type = ? WHERE depositId = ?", (u, t, dep))
-            except Exception as e:
-                logger.exception("Failed to update transaction %s: %s", dep, e)
-        if updates:
-            db.commit()
-            logger.info("Backfilled %d transactions with userId/type from metadata.", len(updates))
+        db.commit()
     except Exception:
         logger.exception("Error during migration/backfill pass")
 
     db.close()
 
+
 with app.app_context():
     init_db()
 
+
 def get_db():
+    """Get or create a DB connection bound to Flask app context."""
     db = getattr(g, "_database", None)
     if db is None:
         db = g._database = sqlite3.connect(DATABASE)
         db.row_factory = sqlite3.Row
     return db
 
+
 @app.teardown_appcontext
 def close_connection(exception):
     db = getattr(g, "_database", None)
     if db is not None:
         db.close()
+
 
 # -------------------------
 # HEALTH
@@ -215,8 +129,9 @@ def close_connection(exception):
 def home():
     return f"PawaPay Callback Receiver running ✅ (API_MODE={API_MODE})"
 
+
 # -------------------------
-# ORIGINAL PAYMENT ENDPOINTS (unchanged)
+# ORIGINAL PAYMENT ENDPOINTS
 # -------------------------
 @app.route("/initiate-payment", methods=["POST"])
 def initiate_payment():
@@ -272,6 +187,7 @@ def initiate_payment():
         logger.exception("Payment initiation error")
         return jsonify({"error": "Internal server error"}), 500
 
+
 @app.route("/callback/deposit", methods=["POST"])
 def deposit_callback():
     try:
@@ -302,6 +218,7 @@ def deposit_callback():
         logger.exception("Callback error")
         return jsonify({"error": "Internal server error"}), 500
 
+
 @app.route("/deposit_status/<deposit_id>")
 def deposit_status(deposit_id):
     db = get_db()
@@ -310,9 +227,12 @@ def deposit_status(deposit_id):
         return jsonify({"status": None, "message": "Deposit not found"}), 404
     res = {k: row[k] for k in row.keys()}
     if res.get("metadata"):
-        try: res["metadata"] = json.loads(res["metadata"])
-        except: pass
+        try:
+            res["metadata"] = json.loads(res["metadata"])
+        except:
+            pass
     return jsonify(res), 200
+
 
 @app.route("/transactions/<deposit_id>")
 def get_transaction(deposit_id):
@@ -322,12 +242,15 @@ def get_transaction(deposit_id):
         return jsonify({"error": "not found"}), 404
     res = {k: row[k] for k in row.keys()}
     if res.get("metadata"):
-        try: res["metadata"] = json.loads(res["metadata"])
-        except: pass
+        try:
+            res["metadata"] = json.loads(res["metadata"])
+        except:
+            pass
     return jsonify(res), 200
 
+
 # -------------------------
-# NEW INVESTMENT ENDPOINTS
+# INVESTMENT ENDPOINTS
 # -------------------------
 @app.route("/api/investments/initiate", methods=["POST"])
 def initiate_investment():
@@ -368,16 +291,13 @@ def initiate_investment():
             logger.error(f"PawaPay response not JSON: {resp.text}")
             return jsonify({"error": "Invalid response from PawaPay"}), 502
 
-        logger.info(f"PawaPay response: {result}")
-
-        # Ensure 'status' is safe
         status = result.get("status", "PENDING")
 
         db = get_db()
         db.execute("""
             INSERT OR REPLACE INTO transactions
             (depositId,status,amount,currency,phoneNumber,provider,
-             providerTransactionId,failureCode,failureMessage,metadata,received_at,type,userId)
+             providerTransactionId,failureCode,failureMessage,metadata,received_at,type,user_id)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             deposit_id,
@@ -398,20 +318,6 @@ def initiate_investment():
         logger.exception("Investment initiation error")
         return jsonify({"error": str(e)}), 500
 
-# @app.route("/api/investments/<deposit_id>", methods=["GET"])
-# def get_investment_status(deposit_id):
-#     db = get_db()
-#     row = db.execute(
-#         "SELECT * FROM transactions WHERE depositId=? AND type='investment'",
-#         (deposit_id,)
-#     ).fetchone()
-#     if not row:
-#         return jsonify({"error": "Investment not found"}), 404
-#     res = {k: row[k] for k in row.keys()}
-#     if res.get("metadata"):
-#         try: res["metadata"] = json.loads(res["metadata"])
-#         except: pass
-#     return jsonify(res), 200
 
 @app.route("/api/investments/user/<user_id>", methods=["GET"])
 def get_user_investments(user_id):
@@ -434,32 +340,12 @@ def get_user_investments(user_id):
     return jsonify(results), 200
 
 
-# INVESTMENT LIST
-@app.route("/api/investments/user/<user_id>", methods=["GET"])
-def get_user_investments(user_id):
-    db = get_db()
-    rows = db.execute(
-        "SELECT * FROM transactions WHERE type='investment' AND userId=? ORDER BY received_at DESC",
-        (user_id,)
-    ).fetchall()
-    
-    results = []
-    for row in rows:
-        res = {k: row[k] for k in row.keys()}
-        if res.get("metadata"):
-            try:
-                res["metadata"] = json.loads(res["metadata"])
-            except:
-                pass
-        results.append(res)
-    
-    return jsonify(results), 200
-
 # -------------------------
 # RUN
 # -------------------------
 if __name__ == "__main__":
-    init_db()
+    with app.app_context():
+        init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
@@ -1501,6 +1387,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
