@@ -153,6 +153,125 @@ def get_db():
     return db
 
 
+
+
+
+# -------------------------
+# LOANS TABLE INIT
+# -------------------------
+def init_loans_table():
+    conn = sqlite3.connect(DATABASE)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS loans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            loanId TEXT UNIQUE,
+            user_id TEXT,
+            amount REAL,
+            interest REAL,
+            status TEXT,            -- PENDING, APPROVED, DISAPPROVED, PAID
+            expected_return_date TEXT,
+            created_at TEXT,
+            approved_by TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+with app.app_context():
+    init_loans_table()
+
+
+# -------------------------
+# REQUEST A LOAN
+# -------------------------
+@app.route("/api/loans/request", methods=["POST"])
+def request_loan():
+    data = request.json
+    user_id = data.get("user_id")
+    amount = data.get("amount")
+    interest = data.get("interest", 5)  # default interest %
+    expected_return_date = data.get("expected_return_date")
+
+    if not user_id or not amount or not expected_return_date:
+        return jsonify({"error": "Missing required fields"}), 400
+
+    loan_id = str(uuid.uuid4())
+    db = get_db()
+    db.execute("""
+        INSERT INTO loans
+        (loanId, user_id, amount, interest, status, expected_return_date, created_at)
+        VALUES (?,?,?,?,?,?,?)
+    """, (loan_id, user_id, amount, interest, "PENDING", expected_return_date, datetime.utcnow().isoformat()))
+    db.commit()
+    return jsonify({"message": "Loan requested", "loanId": loan_id}), 200
+
+
+# -------------------------
+# LIST PENDING LOANS (ADMIN VIEW)
+# -------------------------
+@app.route("/api/loans/pending", methods=["GET"])
+def pending_loans():
+    db = get_db()
+    rows = db.execute("SELECT * FROM loans WHERE status='PENDING' ORDER BY created_at DESC").fetchall()
+    results = [dict(row) for row in rows]
+    return jsonify(results), 200
+
+
+# -------------------------
+# APPROVE LOAN
+# -------------------------
+@app.route("/api/loans/approve/<loan_id>", methods=["POST"])
+def approve_loan(loan_id):
+    admin_id = request.json.get("admin_id", "admin_default")
+    db = get_db()
+    db.execute("UPDATE loans SET status='APPROVED', approved_by=? WHERE loanId=?", (admin_id, loan_id))
+    db.commit()
+
+    # update investor transaction status to LOANED_OUT if exists
+    loan = db.execute("SELECT * FROM loans WHERE loanId=?", (loan_id,)).fetchone()
+    if loan:
+        db.execute("""
+            UPDATE transactions
+            SET status='LOANED_OUT',
+                updated_at=?,
+                metadata=COALESCE(metadata, ''),
+                failureMessage='Loan Approved',
+                failureCode='LOAN'
+            WHERE user_id=? AND type='investment'
+        """, (datetime.utcnow().isoformat(), loan["user_id"]))
+        db.commit()
+
+    return jsonify({"message": "Loan approved"}), 200
+
+
+# -------------------------
+# DISAPPROVE LOAN
+# -------------------------
+@app.route("/api/loans/disapprove/<loan_id>", methods=["POST"])
+def disapprove_loan(loan_id):
+    db = get_db()
+    db.execute("UPDATE loans SET status='DISAPPROVED' WHERE loanId=?", (loan_id,))
+    db.commit()
+    return jsonify({"message": "Loan disapproved"}), 200
+
+
+# -------------------------
+# INVESTOR LOANS VIEW
+# -------------------------
+@app.route("/api/loans/user/<user_id>", methods=["GET"])
+def user_loans(user_id):
+    db = get_db()
+    rows = db.execute("SELECT * FROM loans WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall()
+    results = [dict(row) for row in rows]
+    return jsonify(results), 200
+
+
+
+
+
+
+
 @app.teardown_appcontext
 def close_connection(exception):
     db = getattr(g, "_database", None)
@@ -980,3 +1099,4 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
