@@ -41,17 +41,23 @@ def init_db():
             status TEXT,
             amount REAL,
             currency TEXT,
-            phoneNumber TEXT,
             provider TEXT,
             providerTransactionId TEXT,
             failureCode TEXT,
             failureMessage TEXT,
             metadata TEXT,
             received_at TEXT,
-            type TEXT DEFAULT 'payment',
-            user_id TEXT
+            type TEXT DEFAULT 'payment'
         )
     """)
+    db.commit()
+
+    # Ensure columns phoneNumber and user_id exist
+    existing_cols = [row[1] for row in cur.execute("PRAGMA table_info(transactions)").fetchall()]
+    if "phoneNumber" not in existing_cols:
+        cur.execute("ALTER TABLE transactions ADD COLUMN phoneNumber TEXT")
+    if "user_id" not in existing_cols:
+        cur.execute("ALTER TABLE transactions ADD COLUMN user_id TEXT")
     db.commit()
 
     # Ensure migration of old metadata-based userId/type
@@ -167,8 +173,8 @@ def initiate_payment():
         db.execute("""
             INSERT OR REPLACE INTO transactions
             (depositId,status,amount,currency,phoneNumber,provider,
-             providerTransactionId,failureCode,failureMessage,metadata,received_at,type)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+             providerTransactionId,failureCode,failureMessage,metadata,received_at,type,user_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             deposit_id,
             result.get("status", "PENDING"),
@@ -178,7 +184,8 @@ def initiate_payment():
             None, None, None, None,
             json.dumps(payload["metadata"]),
             datetime.utcnow().isoformat(),
-            "payment"
+            "payment",
+            None
         ))
         db.commit()
         return jsonify({"depositId": deposit_id, **result}), 200
@@ -339,6 +346,45 @@ def get_user_investments(user_id):
 
     return jsonify(results), 200
 
+# -------------------------
+# SAMPLE INVESTMENT ROUTE
+# -------------------------
+@app.route("/sample-investment", methods=["POST"])
+def add_sample():
+    """Add a test investment to verify DB works"""
+    try:
+        db = get_db()
+        deposit_id = str(uuid.uuid4())
+        payload = {
+            "depositId": deposit_id,
+            "amount": 1000.0,
+            "currency": "ZMW",
+            "phoneNumber": "0977123456",
+            "metadata": json.dumps([{"fieldName":"purpose","fieldValue":"investment"},{"fieldName":"userId","fieldValue":"user_1"}]),
+            "received_at": datetime.utcnow().isoformat(),
+            "type": "investment",
+            "user_id": "user_1"
+        }
+        db.execute("""
+            INSERT INTO transactions
+            (depositId,status,amount,currency,phoneNumber,metadata,received_at,type,user_id)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (
+            deposit_id,
+            "SUCCESS",
+            payload["amount"],
+            payload["currency"],
+            payload["phoneNumber"],
+            payload["metadata"],
+            payload["received_at"],
+            payload["type"],
+            payload["user_id"]
+        ))
+        db.commit()
+        return jsonify({"message":"Sample investment added","depositId":deposit_id}), 200
+    except Exception as e:
+        logger.exception("Failed to insert sample")
+        return jsonify({"error": str(e)}), 500
 
 # -------------------------
 # RUN
@@ -348,6 +394,359 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
+
+
+# from dotenv import load_dotenv
+# load_dotenv()
+
+# from flask import Flask, request, jsonify, g
+# import os, logging, sqlite3, json, requests, uuid
+# from datetime import datetime
+
+# # -------------------------
+# # API CONFIGURATION
+# # -------------------------
+# API_MODE = os.getenv("API_MODE", "sandbox")
+# SANDBOX_API_TOKEN = os.getenv("SANDBOX_API_TOKEN")
+# LIVE_API_TOKEN = os.getenv("LIVE_API_TOKEN")
+
+# API_TOKEN = LIVE_API_TOKEN if API_MODE == "live" else SANDBOX_API_TOKEN
+# PAWAPAY_URL = (
+#     "https://api.pawapay.io/deposits"
+#     if API_MODE == "live"
+#     else "https://api.sandbox.pawapay.io/deposits"
+# )
+
+# # -------------------------
+# # DATABASE
+# # -------------------------
+# DATABASE = os.path.join(os.path.dirname(__file__), "transactions.db")
+# app = Flask(__name__)
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
+
+
+# def init_db():
+#     """Initialize database and ensure schema consistency."""
+#     db = sqlite3.connect(DATABASE)
+#     cur = db.cursor()
+
+#     # Create base table if missing
+#     cur.execute("""
+#         CREATE TABLE IF NOT EXISTS transactions (
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             depositId TEXT UNIQUE,
+#             status TEXT,
+#             amount REAL,
+#             currency TEXT,
+#             phoneNumber TEXT,
+#             provider TEXT,
+#             providerTransactionId TEXT,
+#             failureCode TEXT,
+#             failureMessage TEXT,
+#             metadata TEXT,
+#             received_at TEXT,
+#             type TEXT DEFAULT 'payment',
+#             user_id TEXT
+#         )
+#     """)
+#     db.commit()
+
+#     # Ensure migration of old metadata-based userId/type
+#     try:
+#         rows = cur.execute("SELECT depositId, metadata, type, user_id FROM transactions").fetchall()
+#         for r in rows:
+#             deposit_id, metadata, cur_type, cur_user = r
+#             new_type = cur_type or "payment"
+#             new_user = cur_user
+#             changed = False
+
+#             if metadata:
+#                 try:
+#                     meta_obj = json.loads(metadata)
+#                 except Exception:
+#                     meta_obj = None
+
+#                 if isinstance(meta_obj, list):
+#                     for entry in meta_obj:
+#                         if not isinstance(entry, dict):
+#                             continue
+#                         fn = str(entry.get("fieldName") or "").lower()
+#                         fv = entry.get("fieldValue")
+#                         if fn == "userid" and fv and not new_user:
+#                             new_user = str(fv)
+#                             changed = True
+#                         if fn == "purpose" and isinstance(fv, str):
+#                             if fv.lower() == "investment" and new_type != "investment":
+#                                 new_type = "investment"
+#                                 changed = True
+#                 elif isinstance(meta_obj, dict):
+#                     if "userId" in meta_obj and not new_user:
+#                         new_user = str(meta_obj.get("userId"))
+#                         changed = True
+#                     purpose = meta_obj.get("purpose")
+#                     if purpose and isinstance(purpose, str) and purpose.lower() == "investment" and new_type != "investment":
+#                         new_type = "investment"
+#                         changed = True
+
+#             if changed or (cur_user is None and new_user) or (cur_type is None and new_type):
+#                 cur.execute("UPDATE transactions SET user_id=?, type=? WHERE depositId=?",
+#                             (new_user, new_type, deposit_id))
+
+#         db.commit()
+#     except Exception:
+#         logger.exception("Error during migration/backfill pass")
+
+#     db.close()
+
+
+# with app.app_context():
+#     init_db()
+
+
+# def get_db():
+#     """Get or create a DB connection bound to Flask app context."""
+#     db = getattr(g, "_database", None)
+#     if db is None:
+#         db = g._database = sqlite3.connect(DATABASE)
+#         db.row_factory = sqlite3.Row
+#     return db
+
+
+# @app.teardown_appcontext
+# def close_connection(exception):
+#     db = getattr(g, "_database", None)
+#     if db is not None:
+#         db.close()
+
+
+# # -------------------------
+# # HEALTH
+# # -------------------------
+# @app.route("/")
+# def home():
+#     return f"PawaPay Callback Receiver running ✅ (API_MODE={API_MODE})"
+
+
+# # -------------------------
+# # ORIGINAL PAYMENT ENDPOINTS
+# # -------------------------
+# @app.route("/initiate-payment", methods=["POST"])
+# def initiate_payment():
+#     try:
+#         data = request.json
+#         phone = data.get("phone")
+#         amount = data.get("amount")
+#         if not phone or not amount:
+#             return jsonify({"error": "Missing phone or amount"}), 400
+
+#         deposit_id = str(uuid.uuid4())
+#         customer_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+#         payload = {
+#             "depositId": deposit_id,
+#             "amount": str(amount),
+#             "currency": "ZMW",
+#             "correspondent": "MTN_MOMO_ZMB",
+#             "payer": {"type": "MSISDN", "address": {"value": phone}},
+#             "customerTimestamp": customer_ts,
+#             "statementDescription": "StudyCraftPay",
+#             "metadata": [
+#                 {"fieldName": "orderId", "fieldValue": "ORD-" + deposit_id},
+#                 {"fieldName": "customerId", "fieldValue": phone, "isPII": True},
+#             ],
+#         }
+
+#         headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
+#         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
+#         result = resp.json()
+
+#         db = get_db()
+#         db.execute("""
+#             INSERT OR REPLACE INTO transactions
+#             (depositId,status,amount,currency,phoneNumber,provider,
+#              providerTransactionId,failureCode,failureMessage,metadata,received_at,type)
+#             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+#         """, (
+#             deposit_id,
+#             result.get("status", "PENDING"),
+#             float(amount),
+#             "ZMW",
+#             phone,
+#             None, None, None, None,
+#             json.dumps(payload["metadata"]),
+#             datetime.utcnow().isoformat(),
+#             "payment"
+#         ))
+#         db.commit()
+#         return jsonify({"depositId": deposit_id, **result}), 200
+
+#     except Exception:
+#         logger.exception("Payment initiation error")
+#         return jsonify({"error": "Internal server error"}), 500
+
+
+# @app.route("/callback/deposit", methods=["POST"])
+# def deposit_callback():
+#     try:
+#         data = request.get_json(force=True)
+#         deposit_id = data.get("depositId")
+#         db = get_db()
+#         db.execute("""
+#             INSERT OR REPLACE INTO transactions
+#             (depositId,status,amount,currency,phoneNumber,provider,
+#              providerTransactionId,failureCode,failureMessage,metadata,received_at)
+#             VALUES (?,?,?,?,?,?,?,?,?,?,?)
+#         """, (
+#             deposit_id,
+#             data.get("status"),
+#             float(data.get("amount", 0)) if data.get("amount") else None,
+#             data.get("currency"),
+#             data.get("payer", {}).get("accountDetails", {}).get("phoneNumber"),
+#             data.get("payer", {}).get("accountDetails", {}).get("provider"),
+#             data.get("providerTransactionId"),
+#             data.get("failureReason", {}).get("failureCode"),
+#             data.get("failureReason", {}).get("failureMessage"),
+#             json.dumps(data.get("metadata")) if data.get("metadata") else None,
+#             datetime.utcnow().isoformat()
+#         ))
+#         db.commit()
+#         return jsonify({"received": True}), 200
+#     except Exception:
+#         logger.exception("Callback error")
+#         return jsonify({"error": "Internal server error"}), 500
+
+
+# @app.route("/deposit_status/<deposit_id>")
+# def deposit_status(deposit_id):
+#     db = get_db()
+#     row = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
+#     if not row:
+#         return jsonify({"status": None, "message": "Deposit not found"}), 404
+#     res = {k: row[k] for k in row.keys()}
+#     if res.get("metadata"):
+#         try:
+#             res["metadata"] = json.loads(res["metadata"])
+#         except:
+#             pass
+#     return jsonify(res), 200
+
+
+# @app.route("/transactions/<deposit_id>")
+# def get_transaction(deposit_id):
+#     db = get_db()
+#     row = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
+#     if not row:
+#         return jsonify({"error": "not found"}), 404
+#     res = {k: row[k] for k in row.keys()}
+#     if res.get("metadata"):
+#         try:
+#             res["metadata"] = json.loads(res["metadata"])
+#         except:
+#             pass
+#     return jsonify(res), 200
+
+
+# # -------------------------
+# # INVESTMENT ENDPOINTS
+# # -------------------------
+# @app.route("/api/investments/initiate", methods=["POST"])
+# def initiate_investment():
+#     try:
+#         data = request.json
+#         phone = data.get("phone")
+#         amount = data.get("amount")
+#         correspondent = data.get("correspondent", "MTN_MOMO_ZMB")
+#         currency = data.get("currency", "ZMW")
+#         user_id = data.get("user_id", "unknown")
+
+#         if not phone or not amount:
+#             return jsonify({"error": "Missing phone or amount"}), 400
+
+#         deposit_id = str(uuid.uuid4())
+#         customer_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+#         payload = {
+#             "depositId": deposit_id,
+#             "amount": str(amount),
+#             "currency": currency,
+#             "correspondent": correspondent,
+#             "payer": {"type": "MSISDN", "address": {"value": phone}},
+#             "customerTimestamp": customer_ts,
+#             "statementDescription": "Investment",
+#             "metadata": [
+#                 {"fieldName": "purpose", "fieldValue": "investment"},
+#                 {"fieldName": "userId", "fieldValue": str(user_id), "isPII": True},
+#             ],
+#         }
+
+#         headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
+#         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
+
+#         try:
+#             result = resp.json()
+#         except Exception:
+#             logger.error(f"PawaPay response not JSON: {resp.text}")
+#             return jsonify({"error": "Invalid response from PawaPay"}), 502
+
+#         status = result.get("status", "PENDING")
+
+#         db = get_db()
+#         db.execute("""
+#             INSERT OR REPLACE INTO transactions
+#             (depositId,status,amount,currency,phoneNumber,provider,
+#              providerTransactionId,failureCode,failureMessage,metadata,received_at,type,user_id)
+#             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+#         """, (
+#             deposit_id,
+#             status,
+#             float(amount),
+#             currency,
+#             phone,
+#             None, None, None, None,
+#             json.dumps(payload["metadata"]),
+#             datetime.utcnow().isoformat(),
+#             "investment",
+#             user_id
+#         ))
+#         db.commit()
+#         return jsonify({"depositId": deposit_id, "status": status}), 200
+
+#     except Exception as e:
+#         logger.exception("Investment initiation error")
+#         return jsonify({"error": str(e)}), 500
+
+
+# @app.route("/api/investments/user/<user_id>", methods=["GET"])
+# def get_user_investments(user_id):
+#     db = get_db()
+#     rows = db.execute(
+#         "SELECT * FROM transactions WHERE type='investment' AND user_id=? ORDER BY received_at DESC",
+#         (user_id,)
+#     ).fetchall()
+
+#     results = []
+#     for row in rows:
+#         res = {k: row[k] for k in row.keys()}
+#         if res.get("metadata"):
+#             try:
+#                 res["metadata"] = json.loads(res["metadata"])
+#             except:
+#                 pass
+#         results.append(res)
+
+#     return jsonify(results), 200
+
+
+# # -------------------------
+# # RUN
+# # -------------------------
+# if __name__ == "__main__":
+#     with app.app_context():
+#         init_db()
+#     port = int(os.environ.get("PORT", 5000))
+#     app.run(host="0.0.0.0", port=port)
 
 # WORKING AS OF 02/10/25
 # from dotenv import load_dotenv
@@ -1387,6 +1786,7 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     init_db()
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
