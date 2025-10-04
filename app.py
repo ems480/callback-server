@@ -364,168 +364,15 @@ def initiate_payment():
         return jsonify({"error": "Internal server error"}), 500
 
 
-# -------------------------
-# SIMULATE PAYOUT (SANDBOX ONLY)
-# -------------------------
-@app.route("/callback/payout", methods=["POST"])
-def payout_callback():
-    """
-    Simulate PawaPay payout callback in sandbox.
-    Updates the transactions table with payout info.
-    """
-    try:
-        if API_MODE != "sandbox":
-            return jsonify({"error": "Only for sandbox"}), 400
 
-        data = request.get_json(force=True)
-        payout_id = data.get("payoutId") or str(uuid.uuid4())
-        loan_id = data.get("loanId")
-        user_id = data.get("userId")
-        amount = data.get("amount", 0)
-        status = data.get("status", "SUCCESS")
-
-        db = get_db()
-        now_iso = datetime.utcnow().isoformat()
-
-        # Upsert transaction record
-        existing = db.execute(
-            "SELECT * FROM transactions WHERE depositId = ?", (payout_id,)
-        ).fetchone()
-
-        metadata = json.dumps([{"loanId": loan_id}, {"userId": user_id}])
-
-        if existing:
-            db.execute("""
-                UPDATE transactions
-                SET status=?, amount=?, updated_at=?, metadata=?
-                WHERE depositId=?
-            """, (status, amount, now_iso, metadata, payout_id))
-        else:
-            db.execute("""
-                INSERT INTO transactions
-                (depositId,status,amount,currency,phoneNumber,provider,providerTransactionId,
-                 failureCode,failureMessage,metadata,received_at,updated_at,type,user_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (
-                payout_id,
-                status,
-                amount,
-                "ZMW",
-                "sandbox",          # dummy phone
-                "sandbox",          # dummy provider
-                "sandbox_txn",
-                None,
-                None,
-                metadata,
-                now_iso,
-                now_iso,
-                "payout",
-                user_id
-            ))
-        db.commit()
-
-        logger.info("payout_callback: payoutId=%s status=%s user_id=%s loan_id=%s",
-                    payout_id, status, user_id, loan_id)
-
-        return jsonify({"received": True, "payoutId": payout_id, "status": status}), 200
-
-    except Exception as e:
-        logger.exception("Sandbox payout callback error")
-        return jsonify({"error": str(e)}), 500
-
-# -------------------------
-# CALLBACK RECEIVER (upsert-safe for deposits and payouts)
-# -------------------------
 @app.route("/callback/deposit", methods=["POST"])
 def deposit_callback():
-    """
-    Handle both deposit and payout callbacks from PawaPay.
-    Deposits update the transactions table.
-    Payouts update the loans table (status & payoutId).
-    """
     try:
         data = request.get_json(force=True)
-
-        # -------------------------
-        # HANDLE PAYOUT CALLBACK
-        # -------------------------
-        payout_id = data.get("payoutId")
-        if payout_id:
-            status = data.get("status")
-            amount = data.get("amount")
-            currency = data.get("currency")
-            recipient_phone = data.get("recipient", {}).get("accountDetails", {}).get("phoneNumber")
-            provider = data.get("recipient", {}).get("accountDetails", {}).get("provider")
-            metadata_obj = data.get("metadata")
-
-            # parse user_id and loan_id from metadata if present
-            loan_id = None
-            user_id = None
-            if metadata_obj and isinstance(metadata_obj, list):
-                for entry in metadata_obj:
-                    if isinstance(entry, dict):
-                        if entry.get("fieldName","").lower() == "loanid":
-                            loan_id = entry.get("fieldValue")
-                        elif entry.get("fieldName","").lower() == "userid":
-                            user_id = entry.get("fieldValue")
-
-            db = get_db()
-            now_iso = datetime.utcnow().isoformat()
-            metadata_str = json.dumps(metadata_obj) if metadata_obj else None
-
-            if loan_id:
-                existing = db.execute("SELECT * FROM loans WHERE loanId = ?", (loan_id,)).fetchone()
-                if existing:
-                    # Update existing loan row with new payout status
-                    db.execute("""
-                        UPDATE loans
-                        SET
-                            status = COALESCE(?, status),
-                            payoutId = COALESCE(?, payoutId),
-                            updated_at = ?,
-                            user_id = COALESCE(?, user_id)
-                        WHERE loanId = ?
-                    """, (
-                        status,
-                        payout_id,
-                        now_iso,
-                        user_id,
-                        loan_id
-                    ))
-                    db.commit()
-                    logger.info("Payout callback: updated loanId=%s status=%s user_id=%s", loan_id, status, user_id)
-                else:
-                    # Insert new loan row if it doesn't exist (rare case)
-                    db.execute("""
-                        INSERT INTO loans
-                        (loanId, status, payoutId, amount, currency, phoneNumber, provider, metadata, received_at, updated_at, user_id)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                    """, (
-                        loan_id,
-                        status,
-                        payout_id,
-                        float(amount) if amount else None,
-                        currency,
-                        recipient_phone,
-                        provider,
-                        metadata_str,
-                        now_iso,
-                        now_iso,
-                        user_id
-                    ))
-                    db.commit()
-                    logger.info("Payout callback: inserted loanId=%s status=%s user_id=%s", loan_id, status, user_id)
-
-            return jsonify({"received": True, "payoutId": payout_id}), 200
-
-        # -------------------------
-        # ORIGINAL DEPOSIT CALLBACK LOGIC
-        # -------------------------
         deposit_id = data.get("depositId")
         if not deposit_id:
             return jsonify({"error": "Missing depositId"}), 400
 
-        # extract useful fields
         status = data.get("status")
         amount = data.get("amount")
         currency = data.get("currency")
@@ -536,21 +383,24 @@ def deposit_callback():
         failure_message = data.get("failureReason", {}).get("failureMessage")
         metadata_obj = data.get("metadata")
 
-        # parse user_id from metadata if present
         user_id = None
+        loan_id = None
         if metadata_obj:
             if isinstance(metadata_obj, dict):
-                user_id = metadata_obj.get("userId") or metadata_obj.get("userid")
+                user_id = metadata_obj.get("userId")
+                loan_id = metadata_obj.get("loanId")
             elif isinstance(metadata_obj, list):
                 for entry in metadata_obj:
-                    if isinstance(entry, dict) and str(entry.get("fieldName", "")).lower() == "userid":
-                        user_id = entry.get("fieldValue")
-                        break
+                    if isinstance(entry, dict):
+                        if entry.get("fieldName") == "userId":
+                            user_id = entry.get("fieldValue")
+                        if entry.get("fieldName") == "loanId":
+                            loan_id = entry.get("fieldValue")
 
         db = get_db()
-        existing = db.execute("SELECT * FROM transactions WHERE depositId = ?", (deposit_id,)).fetchone()
+        existing = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
         now_iso = datetime.utcnow().isoformat()
-        metadata_str = json.dumps(metadata_obj) if metadata_obj is not None else None
+        metadata_str = json.dumps(metadata_obj) if metadata_obj else None
 
         if existing:
             db.execute("""
@@ -570,7 +420,7 @@ def deposit_callback():
                 WHERE depositId = ?
             """, (
                 status,
-                float(amount) if amount is not None else None,
+                float(amount) if amount else None,
                 currency,
                 payer_phone,
                 provider,
@@ -582,18 +432,18 @@ def deposit_callback():
                 user_id,
                 deposit_id
             ))
-            db.commit()
-            logger.info("deposit_callback: updated depositId=%s status=%s user_id=%s", deposit_id, status, user_id)
         else:
+            # Determine type: deposit or payout
+            txn_type = "payout" if loan_id else "payment"
             db.execute("""
                 INSERT INTO transactions
-                (depositId,status,amount,currency,phoneNumber,provider,providerTransactionId,
-                 failureCode,failureMessage,metadata,received_at,updated_at,type,user_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId,
+                 failureCode, failureMessage, metadata, received_at, updated_at, type, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 deposit_id,
                 status,
-                float(amount) if amount is not None else None,
+                float(amount) if amount else None,
                 currency,
                 payer_phone,
                 provider,
@@ -603,17 +453,202 @@ def deposit_callback():
                 metadata_str,
                 now_iso,
                 now_iso,
-                "payment",
+                txn_type,
                 user_id
             ))
-            db.commit()
-            logger.info("deposit_callback: inserted depositId=%s status=%s user_id=%s", deposit_id, status, user_id)
 
+        # If payout succeeded, update loan status
+        if loan_id and status in ("COMPLETED", "SUCCESS", "PAYMENT_COMPLETED"):
+            db.execute("UPDATE loans SET status=? WHERE loanId=?", (status, loan_id))
+
+        db.commit()
         return jsonify({"received": True}), 200
 
     except Exception:
         logger.exception("Callback error")
         return jsonify({"error": "Internal server error"}), 500
+
+# # -------------------------
+# # CALLBACK RECEIVER (upsert-safe for deposits and payouts)
+# # -------------------------
+# @app.route("/callback/deposit", methods=["POST"])
+# def deposit_callback():
+#     """
+#     Handle both deposit and payout callbacks from PawaPay.
+#     Deposits update the transactions table.
+#     Payouts update the loans table (status & payoutId).
+#     """
+#     try:
+#         data = request.get_json(force=True)
+
+#         # -------------------------
+#         # HANDLE PAYOUT CALLBACK
+#         # -------------------------
+#         payout_id = data.get("payoutId")
+#         if payout_id:
+#             status = data.get("status")
+#             amount = data.get("amount")
+#             currency = data.get("currency")
+#             recipient_phone = data.get("recipient", {}).get("accountDetails", {}).get("phoneNumber")
+#             provider = data.get("recipient", {}).get("accountDetails", {}).get("provider")
+#             metadata_obj = data.get("metadata")
+
+#             # parse user_id and loan_id from metadata if present
+#             loan_id = None
+#             user_id = None
+#             if metadata_obj and isinstance(metadata_obj, list):
+#                 for entry in metadata_obj:
+#                     if isinstance(entry, dict):
+#                         if entry.get("fieldName","").lower() == "loanid":
+#                             loan_id = entry.get("fieldValue")
+#                         elif entry.get("fieldName","").lower() == "userid":
+#                             user_id = entry.get("fieldValue")
+
+#             db = get_db()
+#             now_iso = datetime.utcnow().isoformat()
+#             metadata_str = json.dumps(metadata_obj) if metadata_obj else None
+
+#             if loan_id:
+#                 existing = db.execute("SELECT * FROM loans WHERE loanId = ?", (loan_id,)).fetchone()
+#                 if existing:
+#                     # Update existing loan row with new payout status
+#                     db.execute("""
+#                         UPDATE loans
+#                         SET
+#                             status = COALESCE(?, status),
+#                             payoutId = COALESCE(?, payoutId),
+#                             updated_at = ?,
+#                             user_id = COALESCE(?, user_id)
+#                         WHERE loanId = ?
+#                     """, (
+#                         status,
+#                         payout_id,
+#                         now_iso,
+#                         user_id,
+#                         loan_id
+#                     ))
+#                     db.commit()
+#                     logger.info("Payout callback: updated loanId=%s status=%s user_id=%s", loan_id, status, user_id)
+#                 else:
+#                     # Insert new loan row if it doesn't exist (rare case)
+#                     db.execute("""
+#                         INSERT INTO loans
+#                         (loanId, status, payoutId, amount, currency, phoneNumber, provider, metadata, received_at, updated_at, user_id)
+#                         VALUES (?,?,?,?,?,?,?,?,?,?,?)
+#                     """, (
+#                         loan_id,
+#                         status,
+#                         payout_id,
+#                         float(amount) if amount else None,
+#                         currency,
+#                         recipient_phone,
+#                         provider,
+#                         metadata_str,
+#                         now_iso,
+#                         now_iso,
+#                         user_id
+#                     ))
+#                     db.commit()
+#                     logger.info("Payout callback: inserted loanId=%s status=%s user_id=%s", loan_id, status, user_id)
+
+#             return jsonify({"received": True, "payoutId": payout_id}), 200
+
+#         # -------------------------
+#         # ORIGINAL DEPOSIT CALLBACK LOGIC
+#         # -------------------------
+#         deposit_id = data.get("depositId")
+#         if not deposit_id:
+#             return jsonify({"error": "Missing depositId"}), 400
+
+#         # extract useful fields
+#         status = data.get("status")
+#         amount = data.get("amount")
+#         currency = data.get("currency")
+#         payer_phone = data.get("payer", {}).get("accountDetails", {}).get("phoneNumber")
+#         provider = data.get("payer", {}).get("accountDetails", {}).get("provider")
+#         provider_txn = data.get("providerTransactionId")
+#         failure_code = data.get("failureReason", {}).get("failureCode")
+#         failure_message = data.get("failureReason", {}).get("failureMessage")
+#         metadata_obj = data.get("metadata")
+
+#         # parse user_id from metadata if present
+#         user_id = None
+#         if metadata_obj:
+#             if isinstance(metadata_obj, dict):
+#                 user_id = metadata_obj.get("userId") or metadata_obj.get("userid")
+#             elif isinstance(metadata_obj, list):
+#                 for entry in metadata_obj:
+#                     if isinstance(entry, dict) and str(entry.get("fieldName", "")).lower() == "userid":
+#                         user_id = entry.get("fieldValue")
+#                         break
+
+#         db = get_db()
+#         existing = db.execute("SELECT * FROM transactions WHERE depositId = ?", (deposit_id,)).fetchone()
+#         now_iso = datetime.utcnow().isoformat()
+#         metadata_str = json.dumps(metadata_obj) if metadata_obj is not None else None
+
+#         if existing:
+#             db.execute("""
+#                 UPDATE transactions
+#                 SET
+#                     status = COALESCE(?, status),
+#                     amount = COALESCE(?, amount),
+#                     currency = COALESCE(?, currency),
+#                     phoneNumber = COALESCE(?, phoneNumber),
+#                     provider = COALESCE(?, provider),
+#                     providerTransactionId = COALESCE(?, providerTransactionId),
+#                     failureCode = COALESCE(?, failureCode),
+#                     failureMessage = COALESCE(?, failureMessage),
+#                     metadata = COALESCE(?, metadata),
+#                     updated_at = ?,
+#                     user_id = COALESCE(?, user_id)
+#                 WHERE depositId = ?
+#             """, (
+#                 status,
+#                 float(amount) if amount is not None else None,
+#                 currency,
+#                 payer_phone,
+#                 provider,
+#                 provider_txn,
+#                 failure_code,
+#                 failure_message,
+#                 metadata_str,
+#                 now_iso,
+#                 user_id,
+#                 deposit_id
+#             ))
+#             db.commit()
+#             logger.info("deposit_callback: updated depositId=%s status=%s user_id=%s", deposit_id, status, user_id)
+#         else:
+#             db.execute("""
+#                 INSERT INTO transactions
+#                 (depositId,status,amount,currency,phoneNumber,provider,providerTransactionId,
+#                  failureCode,failureMessage,metadata,received_at,updated_at,type,user_id)
+#                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+#             """, (
+#                 deposit_id,
+#                 status,
+#                 float(amount) if amount is not None else None,
+#                 currency,
+#                 payer_phone,
+#                 provider,
+#                 provider_txn,
+#                 failure_code,
+#                 failure_message,
+#                 metadata_str,
+#                 now_iso,
+#                 now_iso,
+#                 "payment",
+#                 user_id
+#             ))
+#             db.commit()
+#             logger.info("deposit_callback: inserted depositId=%s status=%s user_id=%s", deposit_id, status, user_id)
+
+#         return jsonify({"received": True}), 200
+
+#     except Exception:
+#         logger.exception("Callback error")
+#         return jsonify({"error": "Internal server error"}), 500
 
 
 # # -------------------------
@@ -1484,6 +1519,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
