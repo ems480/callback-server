@@ -364,7 +364,7 @@ def initiate_payment():
         return jsonify({"error": "Internal server error"}), 500
 
 
-
+# TEST ....................
 @app.route("/callback/deposit", methods=["POST"])
 def deposit_callback():
     try:
@@ -982,10 +982,12 @@ def get_pending_loans():
 # -------------------------
 # DISBURSE LOAN (ADMIN ACTION)
 # -------------------------
+
+#Test ................
 @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
 def disburse_loan(loan_id):
     """
-    Admin approves and disburses a pending loan via Pawapay payout.
+    Admin approves and disburses a pending loan via PawaPay payout.
     """
     data = request.json or {}
     admin_id = data.get("admin_id", "admin_default")
@@ -997,9 +999,11 @@ def disburse_loan(loan_id):
     if loan["status"] != "PENDING":
         return jsonify({"error": f"Loan already {loan['status']}"}), 400
 
-    # Get borrower phone from transactions table (investment record)
-    user_id = loan["user_id"]
-    t = db.execute("SELECT phoneNumber FROM transactions WHERE user_id=? AND type='investment' ORDER BY received_at DESC LIMIT 1", (user_id,)).fetchone()
+    # Get borrower phone from last investment transaction
+    t = db.execute(
+        "SELECT phoneNumber FROM transactions WHERE user_id=? AND type='payment' ORDER BY received_at DESC LIMIT 1",
+        (loan["user_id"],)
+    ).fetchone()
     if not t:
         return jsonify({"error": "No phone number found for user"}), 400
     phone = t["phoneNumber"]
@@ -1008,39 +1012,54 @@ def disburse_loan(loan_id):
     payout_id = str(uuid.uuid4())
     payload = {
         "payoutId": payout_id,
+        "amount": str(loan["amount"]),
+        "currency": "ZMW",
         "recipient": {
             "type": "MMO",
             "accountDetails": {
-                "phoneNumber": str(phone),
-                "provider": "MTN_MOMO_ZMB"   # 🔹 later make this dynamic
+                "phoneNumber": phone,
+                "provider": "MTN_MOMO_ZMB"
             }
         },
         "customerMessage": f"Loan {loan_id} disbursement",
-        "amount": str(loan["amount"]),
-        "currency": "ZMW",
         "metadata": [
-            {"loanId": loan_id},
-            {"userId": user_id}
+            {"fieldName": "loanId", "fieldValue": loan_id},
+            {"fieldName": "userId", "fieldValue": loan["user_id"]}
         ]
     }
     headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
 
     try:
-        resp = requests.post(
-            PAWAPAY_PAYOUT_URL,
-            json=payload,
-            headers=headers,
-            timeout=20
-        )
-
+        resp = requests.post(PAWAPAY_PAYOUT_URL, json=payload, headers=headers, timeout=20)
         payout_response = resp.json()
+        payout_status = payout_response.get("status", "PROCESSING")  # sandbox often returns PROCESSING
     except Exception as e:
         return jsonify({"error": f"Payout request failed: {str(e)}"}), 500
 
-    payout_status = payout_response.get("status", "UNKNOWN")
+    # Update loan row immediately with payout status
+    db.execute("UPDATE loans SET status=?, approved_by=? WHERE loanId=?", 
+               (payout_status, admin_id, loan_id))
+    db.commit()
 
-    # Update loan row
-    db.execute("UPDATE loans SET status=?, approved_by=? WHERE loanId=?", (payout_status, admin_id, loan_id))
+    # Insert a transaction record for payout (so callback updates will work)
+    now_iso = datetime.utcnow().isoformat()
+    db.execute("""
+        INSERT INTO transactions 
+        (depositId, status, amount, currency, phoneNumber, provider, metadata, received_at, updated_at, type, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        payout_id,
+        payout_status,
+        loan["amount"],
+        "ZMW",
+        phone,
+        "MTN_MOMO_ZMB",
+        json.dumps(payload.get("metadata")),
+        now_iso,
+        now_iso,
+        "payout",
+        loan["user_id"]
+    ))
     db.commit()
 
     return jsonify({
@@ -1049,6 +1068,77 @@ def disburse_loan(loan_id):
         "status": payout_status,
         "payout_response": payout_response
     }), 200
+
+
+
+
+# @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
+# def disburse_loan(loan_id):
+#     """
+#     Admin approves and disburses a pending loan via Pawapay payout.
+#     """
+#     data = request.json or {}
+#     admin_id = data.get("admin_id", "admin_default")
+
+#     db = get_db()
+#     loan = db.execute("SELECT * FROM loans WHERE loanId=?", (loan_id,)).fetchone()
+#     if not loan:
+#         return jsonify({"error": "Loan not found"}), 404
+#     if loan["status"] != "PENDING":
+#         return jsonify({"error": f"Loan already {loan['status']}"}), 400
+
+#     # Get borrower phone from transactions table (investment record)
+#     user_id = loan["user_id"]
+#     t = db.execute("SELECT phoneNumber FROM transactions WHERE user_id=? AND type='investment' ORDER BY received_at DESC LIMIT 1", (user_id,)).fetchone()
+#     if not t:
+#         return jsonify({"error": "No phone number found for user"}), 400
+#     phone = t["phoneNumber"]
+
+#     # Build payout request
+#     payout_id = str(uuid.uuid4())
+#     payload = {
+#         "payoutId": payout_id,
+#         "recipient": {
+#             "type": "MMO",
+#             "accountDetails": {
+#                 "phoneNumber": str(phone),
+#                 "provider": "MTN_MOMO_ZMB"   # 🔹 later make this dynamic
+#             }
+#         },
+#         "customerMessage": f"Loan {loan_id} disbursement",
+#         "amount": str(loan["amount"]),
+#         "currency": "ZMW",
+#         "metadata": [
+#             {"loanId": loan_id},
+#             {"userId": user_id}
+#         ]
+#     }
+#     headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
+
+#     try:
+#         resp = requests.post(
+#             PAWAPAY_PAYOUT_URL,
+#             json=payload,
+#             headers=headers,
+#             timeout=20
+#         )
+
+#         payout_response = resp.json()
+#     except Exception as e:
+#         return jsonify({"error": f"Payout request failed: {str(e)}"}), 500
+
+#     payout_status = payout_response.get("status", "UNKNOWN")
+
+#     # Update loan row
+#     db.execute("UPDATE loans SET status=?, approved_by=? WHERE loanId=?", (payout_status, admin_id, loan_id))
+#     db.commit()
+
+#     return jsonify({
+#         "loanId": loan_id,
+#         "payoutId": payout_id,
+#         "status": payout_status,
+#         "payout_response": payout_response
+#     }), 200
 
 
 
@@ -1519,6 +1609,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
