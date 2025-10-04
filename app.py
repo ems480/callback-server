@@ -414,109 +414,109 @@ def initiate_payment():
         return jsonify({"error": "Internal server error"}), 500
 
 
-# TEST ....................
-@app.route("/callback/deposit", methods=["POST"])
-def deposit_callback():
-    try:
-        data = request.get_json(force=True)
-        deposit_id = data.get("depositId")
-        if not deposit_id:
-            return jsonify({"error": "Missing depositId"}), 400
+# # TEST 1 callback 1....................
+# @app.route("/callback/deposit", methods=["POST"])
+# def deposit_callback():
+#     try:
+#         data = request.get_json(force=True)
+#         deposit_id = data.get("depositId")
+#         if not deposit_id:
+#             return jsonify({"error": "Missing depositId"}), 400
 
-        status = data.get("status")
-        amount = data.get("amount")
-        currency = data.get("currency")
-        payer_phone = data.get("payer", {}).get("accountDetails", {}).get("phoneNumber")
-        provider = data.get("payer", {}).get("accountDetails", {}).get("provider")
-        provider_txn = data.get("providerTransactionId")
-        failure_code = data.get("failureReason", {}).get("failureCode")
-        failure_message = data.get("failureReason", {}).get("failureMessage")
-        metadata_obj = data.get("metadata")
+#         status = data.get("status")
+#         amount = data.get("amount")
+#         currency = data.get("currency")
+#         payer_phone = data.get("payer", {}).get("accountDetails", {}).get("phoneNumber")
+#         provider = data.get("payer", {}).get("accountDetails", {}).get("provider")
+#         provider_txn = data.get("providerTransactionId")
+#         failure_code = data.get("failureReason", {}).get("failureCode")
+#         failure_message = data.get("failureReason", {}).get("failureMessage")
+#         metadata_obj = data.get("metadata")
 
-        user_id = None
-        loan_id = None
-        if metadata_obj:
-            if isinstance(metadata_obj, dict):
-                user_id = metadata_obj.get("userId")
-                loan_id = metadata_obj.get("loanId")
-            elif isinstance(metadata_obj, list):
-                for entry in metadata_obj:
-                    if isinstance(entry, dict):
-                        if entry.get("fieldName") == "userId":
-                            user_id = entry.get("fieldValue")
-                        if entry.get("fieldName") == "loanId":
-                            loan_id = entry.get("fieldValue")
+#         user_id = None
+#         loan_id = None
+#         if metadata_obj:
+#             if isinstance(metadata_obj, dict):
+#                 user_id = metadata_obj.get("userId")
+#                 loan_id = metadata_obj.get("loanId")
+#             elif isinstance(metadata_obj, list):
+#                 for entry in metadata_obj:
+#                     if isinstance(entry, dict):
+#                         if entry.get("fieldName") == "userId":
+#                             user_id = entry.get("fieldValue")
+#                         if entry.get("fieldName") == "loanId":
+#                             loan_id = entry.get("fieldValue")
 
-        db = get_db()
-        existing = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
-        now_iso = datetime.utcnow().isoformat()
-        metadata_str = json.dumps(metadata_obj) if metadata_obj else None
+#         db = get_db()
+#         existing = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
+#         now_iso = datetime.utcnow().isoformat()
+#         metadata_str = json.dumps(metadata_obj) if metadata_obj else None
 
-        if existing:
-            db.execute("""
-                UPDATE transactions
-                SET
-                    status = COALESCE(?, status),
-                    amount = COALESCE(?, amount),
-                    currency = COALESCE(?, currency),
-                    phoneNumber = COALESCE(?, phoneNumber),
-                    provider = COALESCE(?, provider),
-                    providerTransactionId = COALESCE(?, providerTransactionId),
-                    failureCode = COALESCE(?, failureCode),
-                    failureMessage = COALESCE(?, failureMessage),
-                    metadata = COALESCE(?, metadata),
-                    updated_at = ?,
-                    user_id = COALESCE(?, user_id)
-                WHERE depositId = ?
-            """, (
-                status,
-                float(amount) if amount else None,
-                currency,
-                payer_phone,
-                provider,
-                provider_txn,
-                failure_code,
-                failure_message,
-                metadata_str,
-                now_iso,
-                user_id,
-                deposit_id
-            ))
-        else:
-            # Determine type: deposit or payout
-            txn_type = "payout" if loan_id else "payment"
-            db.execute("""
-                INSERT INTO transactions
-                (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId,
-                 failureCode, failureMessage, metadata, received_at, updated_at, type, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                deposit_id,
-                status,
-                float(amount) if amount else None,
-                currency,
-                payer_phone,
-                provider,
-                provider_txn,
-                failure_code,
-                failure_message,
-                metadata_str,
-                now_iso,
-                now_iso,
-                txn_type,
-                user_id
-            ))
+#         if existing:
+#             db.execute("""
+#                 UPDATE transactions
+#                 SET
+#                     status = COALESCE(?, status),
+#                     amount = COALESCE(?, amount),
+#                     currency = COALESCE(?, currency),
+#                     phoneNumber = COALESCE(?, phoneNumber),
+#                     provider = COALESCE(?, provider),
+#                     providerTransactionId = COALESCE(?, providerTransactionId),
+#                     failureCode = COALESCE(?, failureCode),
+#                     failureMessage = COALESCE(?, failureMessage),
+#                     metadata = COALESCE(?, metadata),
+#                     updated_at = ?,
+#                     user_id = COALESCE(?, user_id)
+#                 WHERE depositId = ?
+#             """, (
+#                 status,
+#                 float(amount) if amount else None,
+#                 currency,
+#                 payer_phone,
+#                 provider,
+#                 provider_txn,
+#                 failure_code,
+#                 failure_message,
+#                 metadata_str,
+#                 now_iso,
+#                 user_id,
+#                 deposit_id
+#             ))
+#         else:
+#             # Determine type: deposit or payout
+#             txn_type = "payout" if loan_id else "payment"
+#             db.execute("""
+#                 INSERT INTO transactions
+#                 (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId,
+#                  failureCode, failureMessage, metadata, received_at, updated_at, type, user_id)
+#                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+#             """, (
+#                 deposit_id,
+#                 status,
+#                 float(amount) if amount else None,
+#                 currency,
+#                 payer_phone,
+#                 provider,
+#                 provider_txn,
+#                 failure_code,
+#                 failure_message,
+#                 metadata_str,
+#                 now_iso,
+#                 now_iso,
+#                 txn_type,
+#                 user_id
+#             ))
 
-        # If payout succeeded, update loan status
-        if loan_id and status in ("COMPLETED", "SUCCESS", "PAYMENT_COMPLETED"):
-            db.execute("UPDATE loans SET status=? WHERE loanId=?", (status, loan_id))
+#         # If payout succeeded, update loan status
+#         if loan_id and status in ("COMPLETED", "SUCCESS", "PAYMENT_COMPLETED"):
+#             db.execute("UPDATE loans SET status=? WHERE loanId=?", (status, loan_id))
 
-        db.commit()
-        return jsonify({"received": True}), 200
+#         db.commit()
+#         return jsonify({"received": True}), 200
 
-    except Exception:
-        logger.exception("Callback error")
-        return jsonify({"error": "Internal server error"}), 500
+#     except Exception:
+#         logger.exception("Callback error")
+#         return jsonify({"error": "Internal server error"}), 500
 
 # # -------------------------
 # # CALLBACK RECEIVER (upsert-safe for deposits and payouts)
@@ -699,6 +699,126 @@ def deposit_callback():
 #     except Exception:
 #         logger.exception("Callback error")
 #         return jsonify({"error": "Internal server error"}), 500
+
+#Test 2 callback 2
+@app.route("/callback/deposit", methods=["POST"])
+def deposit_callback():
+    try:
+        data = request.get_json(force=True)
+
+        # Determine if deposit or payout
+        deposit_id = data.get("depositId")
+        payout_id = data.get("payoutId")
+
+        if not deposit_id and not payout_id:
+            return jsonify({"error": "Missing depositId/payoutId"}), 400
+
+        txn_type = "payment" if deposit_id else "payout"
+        txn_id = deposit_id or payout_id
+
+        # Amount, status, currency
+        status = data.get("status")
+        amount = data.get("amount")
+        currency = data.get("currency")
+
+        # Phone & provider
+        if txn_type == "payment":
+            phone = data.get("payer", {}).get("accountDetails", {}).get("phoneNumber")
+            provider = data.get("payer", {}).get("accountDetails", {}).get("provider")
+        else:  # payout
+            phone = data.get("recipient", {}).get("accountDetails", {}).get("phoneNumber")
+            provider = data.get("recipient", {}).get("accountDetails", {}).get("provider")
+
+        provider_txn = data.get("providerTransactionId")
+        failure_code = data.get("failureReason", {}).get("failureCode")
+        failure_message = data.get("failureReason", {}).get("failureMessage")
+        metadata_obj = data.get("metadata")
+
+        user_id = None
+        loan_id = None
+        if metadata_obj:
+            if isinstance(metadata_obj, dict):
+                user_id = metadata_obj.get("userId")
+                loan_id = metadata_obj.get("loanId")
+            elif isinstance(metadata_obj, list):
+                for entry in metadata_obj:
+                    if isinstance(entry, dict):
+                        if entry.get("fieldName") == "userId":
+                            user_id = entry.get("fieldValue")
+                        if entry.get("fieldName") == "loanId":
+                            loan_id = entry.get("fieldValue")
+
+        db = get_db()
+        existing = db.execute("SELECT * FROM transactions WHERE depositId=? OR depositId=?",
+                              (deposit_id, payout_id)).fetchone()
+        now_iso = datetime.utcnow().isoformat()
+        metadata_str = json.dumps(metadata_obj) if metadata_obj else None
+
+        if existing:
+            db.execute("""
+                UPDATE transactions
+                SET
+                    status = COALESCE(?, status),
+                    amount = COALESCE(?, amount),
+                    currency = COALESCE(?, currency),
+                    phoneNumber = COALESCE(?, phoneNumber),
+                    provider = COALESCE(?, provider),
+                    providerTransactionId = COALESCE(?, providerTransactionId),
+                    failureCode = COALESCE(?, failureCode),
+                    failureMessage = COALESCE(?, failureMessage),
+                    metadata = COALESCE(?, metadata),
+                    updated_at = ?,
+                    user_id = COALESCE(?, user_id)
+                WHERE depositId = ? OR depositId = ?
+            """, (
+                status,
+                float(amount) if amount else None,
+                currency,
+                phone,
+                provider,
+                provider_txn,
+                failure_code,
+                failure_message,
+                metadata_str,
+                now_iso,
+                user_id,
+                deposit_id,
+                payout_id
+            ))
+        else:
+            db.execute("""
+                INSERT INTO transactions
+                (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId,
+                 failureCode, failureMessage, metadata, received_at, updated_at, type, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                txn_id,
+                status,
+                float(amount) if amount else None,
+                currency,
+                phone,
+                provider,
+                provider_txn,
+                failure_code,
+                failure_message,
+                metadata_str,
+                now_iso,
+                now_iso,
+                txn_type,
+                user_id
+            ))
+
+        # Update loan if payout succeeded
+        if txn_type == "payout" and loan_id and status in ("COMPLETED", "SUCCESS", "PAYMENT_COMPLETED"):
+            db.execute("UPDATE loans SET status=? WHERE loanId=?", (status, loan_id))
+
+        db.commit()
+        return jsonify({"received": True}), 200
+
+    except Exception:
+        logger.exception("Callback error")
+        return jsonify({"error": "Internal server error"}), 500
+
 
 
 # # -------------------------
@@ -1797,6 +1917,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
