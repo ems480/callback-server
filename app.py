@@ -20,9 +20,9 @@ PAWAPAY_URL = (
 )
 
 PAWAPAY_PAYOUT_URL = (
-    "https://api.pawapay.io/payouts"
+    "https://api.pawapay.io/v2/payouts"
     if API_MODE == "live"
-    else "https://api.sandbox.pawapay.io/payouts"
+    else "https://api.sandbox.pawapay.io/v2/payouts"
 )
 
 # -------------------------
@@ -1917,6 +1917,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
