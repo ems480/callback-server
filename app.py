@@ -1302,7 +1302,7 @@ def get_pending_loans():
 # -------------------------
 # /api/loans/pending
 # /api/loans/disburse/<loan_id>
-@app.route("/api/loans/pending", methods=["POST"])
+@app.route("/api/loans/pending/<loan_id>", methods=["POST"])
 def disburse_loan(loan_id):
     """
     Admin approves and disburses a pending loan via PawaPay payout.
@@ -1919,6 +1919,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
