@@ -364,6 +364,74 @@ def initiate_payment():
         return jsonify({"error": "Internal server error"}), 500
 
 
+# -------------------------
+# SIMULATE PAYOUT (SANDBOX ONLY)
+# -------------------------
+@app.route("/callback/payout", methods=["POST"])
+def payout_callback():
+    """
+    Simulate PawaPay payout callback in sandbox.
+    Updates the transactions table with payout info.
+    """
+    try:
+        if API_MODE != "sandbox":
+            return jsonify({"error": "Only for sandbox"}), 400
+
+        data = request.get_json(force=True)
+        payout_id = data.get("payoutId") or str(uuid.uuid4())
+        loan_id = data.get("loanId")
+        user_id = data.get("userId")
+        amount = data.get("amount", 0)
+        status = data.get("status", "SUCCESS")
+
+        db = get_db()
+        now_iso = datetime.utcnow().isoformat()
+
+        # Upsert transaction record
+        existing = db.execute(
+            "SELECT * FROM transactions WHERE depositId = ?", (payout_id,)
+        ).fetchone()
+
+        metadata = json.dumps([{"loanId": loan_id}, {"userId": user_id}])
+
+        if existing:
+            db.execute("""
+                UPDATE transactions
+                SET status=?, amount=?, updated_at=?, metadata=?
+                WHERE depositId=?
+            """, (status, amount, now_iso, metadata, payout_id))
+        else:
+            db.execute("""
+                INSERT INTO transactions
+                (depositId,status,amount,currency,phoneNumber,provider,providerTransactionId,
+                 failureCode,failureMessage,metadata,received_at,updated_at,type,user_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                payout_id,
+                status,
+                amount,
+                "ZMW",
+                "sandbox",          # dummy phone
+                "sandbox",          # dummy provider
+                "sandbox_txn",
+                None,
+                None,
+                metadata,
+                now_iso,
+                now_iso,
+                "payout",
+                user_id
+            ))
+        db.commit()
+
+        logger.info("payout_callback: payoutId=%s status=%s user_id=%s loan_id=%s",
+                    payout_id, status, user_id, loan_id)
+
+        return jsonify({"received": True, "payoutId": payout_id, "status": status}), 200
+
+    except Exception as e:
+        logger.exception("Sandbox payout callback error")
+        return jsonify({"error": str(e)}), 500
 
 # -------------------------
 # CALLBACK RECEIVER (upsert-safe for deposits and payouts)
@@ -1416,6 +1484,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
