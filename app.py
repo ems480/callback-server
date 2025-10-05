@@ -747,7 +747,7 @@ def get_pending_loans():
 #TEST 4
 # @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
 # def disburse_loan(loan_id):
-@app.route("/api/loans/disburse", methods=["POST"])
+@app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
 def disburse_loan():
     try:
         data = request.json or {}
@@ -977,6 +977,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
