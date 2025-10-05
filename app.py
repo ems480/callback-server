@@ -1425,6 +1425,7 @@ def disburse_loan(loan_id):
         short_msg = short_msg[:22]
 
     # Build payout payload (metadata as fieldName/fieldValue so callback parsing is consistent)
+    # --- Build safe PawaPay-compliant payout ---
     payout_id = str(uuid.uuid4())
     payload = {
         "payoutId": payout_id,
@@ -1435,41 +1436,30 @@ def disburse_loan(loan_id):
                 "provider": "MTN_MOMO_ZMB"
             }
         },
-        "customerMessage": short_msg,
         "amount": str(loan.get("amount")),
-        "currency": "ZMW",
-        "metadata": [
-            {"fieldName": "loanId", "fieldValue": loan_id},
-            {"fieldName": "userId", "fieldValue": loan.get("user_id")}
-        ]
+        "currency": "ZMW"
     }
-
-    headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
-
+    
+    headers = {
+        "Authorization": f"Bearer {API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
     try:
         resp = requests.post(PAWAPAY_PAYOUT_URL, json=payload, headers=headers, timeout=20)
-        try:
-            payout_response = resp.json()
-        except Exception:
-            payout_response = {"raw_text": resp.text, "status_code": resp.status_code}
+        payout_response = resp.json()
     except Exception as e:
-        logger.exception("Payout request failed")
         return jsonify({"error": f"Payout request failed: {str(e)}"}), 500
-
+    
     payout_status = payout_response.get("status", "UNKNOWN")
-
-    # Update loan row with the payout status and approver
-    try:
-        db.execute(
-            "UPDATE loans SET status=?, approved_by=? WHERE loanId=?",
-            (payout_status, admin_id, loan_id)
-        )
-        db.commit()
-    except Exception:
-        logger.exception("Failed updating loan after payout")
-
-    logger.info("Disburse loan=%s payout_id=%s payout_status=%s", loan_id, payout_id, payout_status)
-
+    
+    # --- Update DB ---
+    db.execute(
+        "UPDATE loans SET status=?, approved_by=? WHERE loanId=?",
+        (payout_status, admin_id, loan_id)
+    )
+    db.commit()
+    
     return jsonify({
         "loanId": loan_id,
         "payoutId": payout_id,
@@ -1945,6 +1935,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
