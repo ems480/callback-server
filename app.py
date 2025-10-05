@@ -1459,7 +1459,31 @@ def disburse_loan(loan_id):
         (payout_status, admin_id, loan_id)
     )
     db.commit()
+    # ----------------------------------------------------
+    # 🔁 Update investment status to 'LOANED_OUT' if linked
+    # ----------------------------------------------------
+    if payout_status in ["SUCCESS", "ACCEPTED", "PENDING"]:
+        try:
+            # Find the investment linked to this loan
+            investment = db.execute("""
+                SELECT id FROM investments
+                WHERE loan_id=? LIMIT 1
+            """, (loan_id,)).fetchone()
     
+            if investment:
+                db.execute("""
+                    UPDATE investments
+                    SET status = 'LOANED_OUT'
+                    WHERE loan_id = ?
+                """, (loan_id,))
+                db.commit()
+                print(f"✅ Investment for Loan {loan_id} marked as LOANED_OUT")
+            else:
+                print(f"ℹ️ No investment linked to Loan {loan_id}")
+    
+        except Exception as e:
+            print("⚠️ Failed to update investment status:", str(e))
+        
     return jsonify({
         "loanId": loan_id,
         "payoutId": payout_id,
@@ -1935,6 +1959,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
