@@ -745,113 +745,197 @@ def get_pending_loans():
 # -------------------------
 
 #TEST 4
-@app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
-def disburse_loan(loan_id):
-    """
-    Admin approves and disburses a pending loan via PawaPay payout.
-    - trims customerMessage to <=22 chars (PawaPay requirement)
-    - returns the full payout_response so client can show details
-    """
-    data = request.json or {}
-    admin_id = data.get("admin_id", "admin_default")
-
-    db = get_db()
-    db.row_factory = sqlite3.Row
-
-    loan_row = db.execute("SELECT * FROM loans WHERE loanId=?", (loan_id,)).fetchone()
-    if not loan_row:
-        return jsonify({"error": "Loan not found"}), 404
-
-    # convert sqlite3.Row -> dict for .get() usage
-    loan = dict(loan_row)
-
-    if loan.get("status") != "PENDING":
-        return jsonify({"error": f"Loan already {loan.get('status')}"}), 400
-
-    # Prefer phone saved on loan, else fallback to user's latest investment phone
-    phone = loan.get("phone")
-    if not phone:
-        user_id = loan.get("user_id")
-        t = db.execute("""
-            SELECT phoneNumber FROM transactions 
-            WHERE user_id=? AND type='investment'
-            ORDER BY received_at DESC LIMIT 1
-        """, (user_id,)).fetchone()
-        if t:
-            phone = t["phoneNumber"]
-        else:
-            return jsonify({"error": "No phone number found for user"}), 400
-
-    # Build a short customer message (PawaPay requires <=22 chars)
-    # Use a compact form like "Loan:abcd1234" (8 chars of id). Adjust if you want different format.
-    short_msg = f"Loan:{loan_id[:8]}"
-    if len(short_msg) > 22:
-        short_msg = short_msg[:22]
-
-    # Build payout payload (metadata as fieldName/fieldValue so callback parsing is consistent)
-    # --- Build safe PawaPay-compliant payout ---
-    payout_id = str(uuid.uuid4())
-    payload = {
-        "payoutId": payout_id,
-        "recipient": {
-            "type": "MMO",
-            "accountDetails": {
-                "phoneNumber": str(phone),
-                "provider": "MTN_MOMO_ZMB"
-            }
-        },
-        "amount": str(loan.get("amount")),
-        "currency": "ZMW"
-    }
-    
-    headers = {
-        "Authorization": f"Bearer {API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    
+@app.route("/disburse_loan", methods=["POST"])
+def disburse_loan():
     try:
-        resp = requests.post(PAWAPAY_PAYOUT_URL, json=payload, headers=headers, timeout=20)
-        payout_response = resp.json()
-    except Exception as e:
-        return jsonify({"error": f"Payout request failed: {str(e)}"}), 500
-    
-    payout_status = payout_response.get("status", "UNKNOWN")
-    
-    # --- Update DB ---
-    db.execute(
-        "UPDATE loans SET status=?, approved_by=? WHERE loanId=?",
-        (payout_status, admin_id, loan_id)
-    )
-    db.commit()
-    
-    # ----------------------------------------------------
-    # 🔁 Update investment status to 'LOANED_OUT' if linked + notify investor
-    # ----------------------------------------------------
-    if payout_status in ["SUCCESS", "ACCEPTED", "PENDING"]:
-        try:
+        data = request.json or {}
+        phone = data.get("phone")
+        amount = data.get("amount")
+        correspondent = data.get("correspondent", "MTN_MOMO_ZMB")
+        currency = data.get("currency", "ZMW")
+        loan_id = data.get("loan_id")
+
+        if not all([phone, amount, loan_id]):
+            return jsonify({"error": "Missing required fields"}), 400
+
+        db = get_db()
+
+        # 🧠 1. Fetch an available investment to fund this loan
+        investment = db.execute("""
+            SELECT depositId FROM transactions
+            WHERE type = 'investment' AND status = 'ACTIVE'
+            ORDER BY received_at ASC LIMIT 1
+        """).fetchone()
+
+        if not investment:
+            return jsonify({"error": "No available investment found to fund this loan"}), 400
+
+        investment_id = investment["depositId"]
+
+        # 🧠 2. Link this investment to the loan
+        db.execute("""
+            UPDATE loans SET investment_id = ? WHERE loan_id = ?
+        """, (investment_id, loan_id))
+        db.commit()
+
+        # 🧠 3. Initiate PawaPay disbursement
+        payout_id = str(uuid.uuid4())
+        payload = {
+            "payoutId": payout_id,
+            "recipient": {
+                "type": "MMO",
+                "accountDetails": {
+                    "phoneNumber": phone,
+                    "provider": correspondent
+                }
+            },
+            "amount": str(amount),
+            "currency": currency
+        }
+        headers = {
+            "Authorization": f"Bearer {API_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        resp = requests.post(f"{PAWAPAY_URL}/payouts", json=payload, headers=headers)
+        response_data = resp.json()
+
+        # 🧠 4. Check disbursement result
+        status = response_data.get("status", "PENDING")
+
+        # 🧠 5. Update only the investment used for this loan
+        if status == "SUCCESSFUL":
             db.execute("""
                 UPDATE transactions
                 SET status = 'LOANED_OUT', updated_at = ?
-                WHERE type = 'investment' AND user_id = ?
-            """, (datetime.utcnow().isoformat(), loan["user_id"]))
+                WHERE depositId = ? AND type = 'investment'
+            """, (datetime.utcnow().isoformat(), investment_id))
             db.commit()
 
-            # Notify investor
-            notify_investor(
-                loan["user_id"],
-                f"Your investment linked to loan {loan_id[:8]} has been loaned out."
-            )
+            # Optional: notify investor
+            logger.info(f"Investment {investment_id} marked as LOANED_OUT (linked to loan {loan_id})")
 
-            print(f"✅ Investment for Loan {loan_id} marked as LOANED_OUT & investor notified.")
-        except Exception as e:
-            print("⚠️ Failed to update investment/notify investor:", str(e))
+        else:
+            logger.warning(f"Disbursement failed: {response_data}")
+
+        return jsonify({
+            "loan_id": loan_id,
+            "investment_id": investment_id,
+            "payout_status": status,
+            "payout_response": response_data
+        }), 200
+
+    except Exception as e:
+        logger.exception("Error disbursing loan")
+        return jsonify({"error": str(e)}), 500
+
+
+# @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
+# def disburse_loan(loan_id):
+#     """
+#     Admin approves and disburses a pending loan via PawaPay payout.
+#     - trims customerMessage to <=22 chars (PawaPay requirement)
+#     - returns the full payout_response so client can show details
+#     """
+#     data = request.json or {}
+#     admin_id = data.get("admin_id", "admin_default")
+
+#     db = get_db()
+#     db.row_factory = sqlite3.Row
+
+#     loan_row = db.execute("SELECT * FROM loans WHERE loanId=?", (loan_id,)).fetchone()
+#     if not loan_row:
+#         return jsonify({"error": "Loan not found"}), 404
+
+#     # convert sqlite3.Row -> dict for .get() usage
+#     loan = dict(loan_row)
+
+#     if loan.get("status") != "PENDING":
+#         return jsonify({"error": f"Loan already {loan.get('status')}"}), 400
+
+#     # Prefer phone saved on loan, else fallback to user's latest investment phone
+#     phone = loan.get("phone")
+#     if not phone:
+#         user_id = loan.get("user_id")
+#         t = db.execute("""
+#             SELECT phoneNumber FROM transactions 
+#             WHERE user_id=? AND type='investment'
+#             ORDER BY received_at DESC LIMIT 1
+#         """, (user_id,)).fetchone()
+#         if t:
+#             phone = t["phoneNumber"]
+#         else:
+#             return jsonify({"error": "No phone number found for user"}), 400
+
+#     # Build a short customer message (PawaPay requires <=22 chars)
+#     # Use a compact form like "Loan:abcd1234" (8 chars of id). Adjust if you want different format.
+#     short_msg = f"Loan:{loan_id[:8]}"
+#     if len(short_msg) > 22:
+#         short_msg = short_msg[:22]
+
+#     # Build payout payload (metadata as fieldName/fieldValue so callback parsing is consistent)
+#     # --- Build safe PawaPay-compliant payout ---
+#     payout_id = str(uuid.uuid4())
+#     payload = {
+#         "payoutId": payout_id,
+#         "recipient": {
+#             "type": "MMO",
+#             "accountDetails": {
+#                 "phoneNumber": str(phone),
+#                 "provider": "MTN_MOMO_ZMB"
+#             }
+#         },
+#         "amount": str(loan.get("amount")),
+#         "currency": "ZMW"
+#     }
+    
+#     headers = {
+#         "Authorization": f"Bearer {API_TOKEN}",
+#         "Content-Type": "application/json"
+#     }
+    
+#     try:
+#         resp = requests.post(PAWAPAY_PAYOUT_URL, json=payload, headers=headers, timeout=20)
+#         payout_response = resp.json()
+#     except Exception as e:
+#         return jsonify({"error": f"Payout request failed: {str(e)}"}), 500
+    
+#     payout_status = payout_response.get("status", "UNKNOWN")
+    
+#     # --- Update DB ---
+#     db.execute(
+#         "UPDATE loans SET status=?, approved_by=? WHERE loanId=?",
+#         (payout_status, admin_id, loan_id)
+#     )
+#     db.commit()
+    
+#     # ----------------------------------------------------
+#     # 🔁 Update investment status to 'LOANED_OUT' if linked + notify investor
+#     # ----------------------------------------------------
+#     if payout_status in ["SUCCESS", "ACCEPTED", "PENDING"]:
+#         try:
+#             db.execute("""
+#                 UPDATE transactions
+#                 SET status = 'LOANED_OUT', updated_at = ?
+#                 WHERE type = 'investment' AND user_id = ?
+#             """, (datetime.utcnow().isoformat(), loan["user_id"]))
+#             db.commit()
+
+#             # Notify investor
+#             notify_investor(
+#                 loan["user_id"],
+#                 f"Your investment linked to loan {loan_id[:8]} has been loaned out."
+#             )
+
+#             print(f"✅ Investment for Loan {loan_id} marked as LOANED_OUT & investor notified.")
+#         except Exception as e:
+#             print("⚠️ Failed to update investment/notify investor:", str(e))
             
-    return jsonify({
-        "loanId": loan_id,
-        "payoutId": payout_id,
-        "status": payout_status,
-        "payout_response": payout_response
-    }), 200
+#     return jsonify({
+#         "loanId": loan_id,
+#         "payoutId": payout_id,
+#         "status": payout_status,
+#         "payout_response": payout_response
+#     }), 200
 
 
 # -------------------------
@@ -891,3 +975,4 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
