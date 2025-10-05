@@ -757,7 +757,8 @@ def get_pending_loans():
 @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
 def disburse_loan(loan_id):
     try:
-        data = request.get_json()
+        db = get_db()  # ✅ Get the database connection
+        data = request.get_json() or {}
         logger.info(f"Disbursing loan {loan_id} with data: {data}")
 
         # ✅ Fetch loan details
@@ -794,7 +795,7 @@ def disburse_loan(loan_id):
             (datetime.utcnow().isoformat(), loan_id)
         )
 
-        # ✅ Create a transaction record for the disbursement
+        # ✅ Record the disbursement transaction
         db.execute("""
             INSERT INTO transactions (user_id, amount, type, status, reference, created_at, updated_at)
             VALUES (?, ?, 'loan_disbursement', 'SUCCESS', ?, ?, ?)
@@ -806,7 +807,7 @@ def disburse_loan(loan_id):
 
         db.commit()
 
-        # ✅ Link the disbursed loan to one investor and mark it as loaned out
+        # ✅ Link this loan to one available investment
         try:
             investment_row = db.execute("""
                 SELECT depositId FROM transactions
@@ -817,7 +818,7 @@ def disburse_loan(loan_id):
             if investment_row:
                 investment_id = investment_row["depositId"]
 
-                # ✅ Mark that single investment as loaned out and link to the loan
+                # ✅ Mark that single investment as LOANED_OUT
                 db.execute("""
                     UPDATE transactions
                     SET status = 'LOANED_OUT', investment_id = ?, updated_at = ?
@@ -825,7 +826,7 @@ def disburse_loan(loan_id):
                 """, (loan_id, datetime.utcnow().isoformat(), investment_id))
                 db.commit()
 
-                # ✅ Notify the investor who owns this investment
+                # ✅ Notify the investor
                 investor_row = db.execute("""
                     SELECT user_id FROM transactions
                     WHERE depositId = ? AND type = 'investment'
@@ -838,14 +839,12 @@ def disburse_loan(loan_id):
                     )
 
                 logger.info(f"Investment {investment_id} linked to loan {loan_id}")
-
             else:
                 logger.warning("No available active investment found to link with this loan.")
 
         except Exception as e:
             logger.error(f"Error linking investment to loan {loan_id}: {e}")
 
-        # ✅ Return success response
         return jsonify({
             "message": f"Loan {loan_id} successfully disbursed",
             "borrower_id": borrower_id,
@@ -1004,6 +1003,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
