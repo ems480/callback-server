@@ -99,13 +99,22 @@ def init_db():
     existing_cols = [r[1] for r in cur.fetchall()]
 
     # Add missing columns one-by-one in a safe way
+    # needed = {
+    #     "phoneNumber": "TEXT",
+    #     "metadata": "TEXT",
+    #     "updated_at": "TEXT",
+    #     "type": "TEXT DEFAULT 'payment'",
+    #     "user_id": "TEXT"
+    # }
     needed = {
         "phoneNumber": "TEXT",
         "metadata": "TEXT",
         "updated_at": "TEXT",
         "type": "TEXT DEFAULT 'payment'",
-        "user_id": "TEXT"
+        "user_id": "TEXT",
+        "investment_id": "TEXT"   # ✅ NEW
     }
+
     for col, coltype in needed.items():
         if col not in existing_cols:
             try:
@@ -747,86 +756,105 @@ def get_pending_loans():
 #TEST 4
 @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
 def disburse_loan(loan_id):
-    # your disbursement logic
     try:
-        data = request.json or {}
-        phone = data.get("phone")
-        amount = data.get("amount")
-        correspondent = data.get("correspondent", "MTN_MOMO_ZMB")
-        currency = data.get("currency", "ZMW")
-        loan_id = data.get("loan_id")
+        data = request.get_json()
+        logger.info(f"Disbursing loan {loan_id} with data: {data}")
 
-        if not all([phone, amount, loan_id]):
-            return jsonify({"error": "Missing required fields"}), 400
+        # ✅ Fetch loan details
+        loan = db.execute("SELECT * FROM loans WHERE loan_id = ?", (loan_id,)).fetchone()
+        if not loan:
+            return jsonify({"error": "Loan not found"}), 404
 
-        db = get_db()
+        # ✅ Ensure loan is approved before disbursement
+        if loan["status"] != "approved":
+            return jsonify({"error": "Loan is not approved for disbursement"}), 400
 
-        # 🧠 1. Fetch an available investment to fund this loan
-        investment = db.execute("""
-            SELECT depositId FROM transactions
-            WHERE type = 'investment' AND status = 'ACTIVE'
-            ORDER BY received_at ASC LIMIT 1
-        """).fetchone()
+        borrower_id = loan["borrower_id"]
+        amount = float(loan["amount"])
 
-        if not investment:
-            return jsonify({"error": "No available investment found to fund this loan"}), 400
+        # ✅ Fetch borrower wallet
+        borrower_wallet = db.execute(
+            "SELECT * FROM wallets WHERE user_id = ?", (borrower_id,)
+        ).fetchone()
+        if not borrower_wallet:
+            return jsonify({"error": "Borrower wallet not found"}), 404
 
-        investment_id = investment["depositId"]
+        borrower_balance = float(borrower_wallet["balance"])
 
-        # 🧠 2. Link this investment to the loan
+        # ✅ Credit borrower wallet
+        new_balance = borrower_balance + amount
+        db.execute(
+            "UPDATE wallets SET balance = ?, updated_at = ? WHERE user_id = ?",
+            (new_balance, datetime.utcnow().isoformat(), borrower_id)
+        )
+
+        # ✅ Mark loan as disbursed
+        db.execute(
+            "UPDATE loans SET status = 'disbursed', disbursed_at = ? WHERE loan_id = ?",
+            (datetime.utcnow().isoformat(), loan_id)
+        )
+
+        # ✅ Create a transaction record for the disbursement
         db.execute("""
-            UPDATE loans SET investment_id = ? WHERE loan_id = ?
-        """, (investment_id, loan_id))
+            INSERT INTO transactions (user_id, amount, type, status, reference, created_at, updated_at)
+            VALUES (?, ?, 'loan_disbursement', 'SUCCESS', ?, ?, ?)
+        """, (
+            borrower_id, amount, loan_id,
+            datetime.utcnow().isoformat(),
+            datetime.utcnow().isoformat()
+        ))
+
         db.commit()
 
-        # 🧠 3. Initiate PawaPay disbursement
-        payout_id = str(uuid.uuid4())
-        payload = {
-            "payoutId": payout_id,
-            "recipient": {
-                "type": "MMO",
-                "accountDetails": {
-                    "phoneNumber": phone,
-                    "provider": correspondent
-                }
-            },
-            "amount": str(amount),
-            "currency": currency
-        }
-        headers = {
-            "Authorization": f"Bearer {API_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        resp = requests.post(f"{PAWAPAY_URL}/payouts", json=payload, headers=headers)
-        response_data = resp.json()
+        # ✅ Link the disbursed loan to one investor and mark it as loaned out
+        try:
+            investment_row = db.execute("""
+                SELECT depositId FROM transactions
+                WHERE type = 'investment' AND status = 'ACTIVE'
+                ORDER BY received_at ASC LIMIT 1
+            """).fetchone()
 
-        # 🧠 4. Check disbursement result
-        status = response_data.get("status", "PENDING")
+            if investment_row:
+                investment_id = investment_row["depositId"]
 
-        # 🧠 5. Update only the investment used for this loan
-        if status == "SUCCESSFUL":
-            db.execute("""
-                UPDATE transactions
-                SET status = 'LOANED_OUT', updated_at = ?
-                WHERE depositId = ? AND type = 'investment'
-            """, (datetime.utcnow().isoformat(), investment_id))
-            db.commit()
+                # ✅ Mark that single investment as loaned out and link to the loan
+                db.execute("""
+                    UPDATE transactions
+                    SET status = 'LOANED_OUT', investment_id = ?, updated_at = ?
+                    WHERE depositId = ?
+                """, (loan_id, datetime.utcnow().isoformat(), investment_id))
+                db.commit()
 
-            # Optional: notify investor
-            logger.info(f"Investment {investment_id} marked as LOANED_OUT (linked to loan {loan_id})")
+                # ✅ Notify the investor who owns this investment
+                investor_row = db.execute("""
+                    SELECT user_id FROM transactions
+                    WHERE depositId = ? AND type = 'investment'
+                """, (investment_id,)).fetchone()
 
-        else:
-            logger.warning(f"Disbursement failed: {response_data}")
+                if investor_row and investor_row["user_id"]:
+                    notify_investor(
+                        investor_row["user_id"],
+                        f"Your investment {investment_id[:8]} has been loaned out to borrower {loan_id[:8]}."
+                    )
 
+                logger.info(f"Investment {investment_id} linked to loan {loan_id}")
+
+            else:
+                logger.warning("No available active investment found to link with this loan.")
+
+        except Exception as e:
+            logger.error(f"Error linking investment to loan {loan_id}: {e}")
+
+        # ✅ Return success response
         return jsonify({
-            "loan_id": loan_id,
-            "investment_id": investment_id,
-            "payout_status": status,
-            "payout_response": response_data
+            "message": f"Loan {loan_id} successfully disbursed",
+            "borrower_id": borrower_id,
+            "amount": amount,
+            "new_balance": new_balance
         }), 200
 
     except Exception as e:
-        logger.exception("Error disbursing loan")
+        logger.error(f"Error disbursing loan {loan_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -976,6 +1004,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
