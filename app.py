@@ -908,11 +908,17 @@ def disburse_loan(loan_id):
 
         # ✅ Link this loan to one available investment
         try:
+            # investment_row = db.execute("""
+            #     SELECT depositId FROM transactions
+            #     WHERE type = 'investment' AND status = 'ACTIVE'
+            #     ORDER BY received_at ASC LIMIT 1
+            # """).fetchone()
             investment_row = db.execute("""
-                SELECT depositId FROM transactions
+                SELECT reference FROM transactions
                 WHERE type = 'investment' AND status = 'ACTIVE'
-                ORDER BY received_at ASC LIMIT 1
+                ORDER BY created_at ASC LIMIT 1
             """).fetchone()
+
 
             if investment_row:
                 # investment_id = investment_row["depositId"]
@@ -922,21 +928,27 @@ def disburse_loan(loan_id):
                 # ✅ Mark that single investment as LOANED_OUT
                 db.execute("""
                     UPDATE transactions
-                    SET status = 'LOANED_OUT', investment_id = ?, updated_at = ?
-                    WHERE depositId = ?
+                    SET status = 'LOANED_OUT', updated_at = ?
+                    WHERE reference = ?
+
+                    # UPDATE transactions
+                    # SET status = 'LOANED_OUT', investment_id = ?, updated_at = ?
+                    # WHERE depositId = ?
                 """, (loan_id, datetime.utcnow().isoformat(), investment_id))
                 db.commit()
 
                 # ✅ Notify the investor
-                # investor_row = db.execute("""
-                #     SELECT user_id FROM transactions
-                #     WHERE depositId = ? AND type = 'investment'
-                # """, (investment_id,)).fetchone()
-                investment_row = db.execute("""
-                    SELECT reference FROM transactions
-                    WHERE type = 'investment' AND status = 'ACTIVE'
-                    ORDER BY created_at ASC LIMIT 1
-                """).fetchone()
+                investor_row = db.execute("""
+                    SELECT user_id FROM transactions
+                    WHERE reference = ? AND type = 'investment'
+                    # SELECT user_id FROM transactions
+                    # WHERE depositId = ? AND type = 'investment'
+                """, (investment_id,)).fetchone()
+                # investment_row = db.execute("""
+                #     SELECT reference FROM transactions
+                #     WHERE type = 'investment' AND status = 'ACTIVE'
+                #     ORDER BY created_at ASC LIMIT 1
+                # """).fetchone()
 
 
                 if investor_row and investor_row["user_id"]:
@@ -1001,6 +1013,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
