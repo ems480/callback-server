@@ -120,15 +120,15 @@ def notify_investor(user_id, message):
 
 def init_db():
     """
-    Initializes database tables and performs safe migrations.
-    Keeps existing transaction logic untouched and adds loans table.
+    Create the transactions and loans tables if missing and safely add any missing columns.
+    Also run a small backfill to populate 'type' and 'user_id' from metadata where possible.
     """
     conn = sqlite3.connect(DATABASE)
     cur = conn.cursor()
 
-    # -----------------------------
-    # ✅ 1. Create or migrate transactions table (unchanged)
-    # -----------------------------
+    # =========================
+    # ✅ TRANSACTIONS TABLE
+    # =========================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,7 +145,8 @@ def init_db():
             received_at TEXT,
             updated_at TEXT,
             type TEXT DEFAULT 'payment',
-            user_id TEXT
+            user_id TEXT,
+            investment_id TEXT
         )
     """)
     conn.commit()
@@ -159,7 +160,7 @@ def init_db():
         "updated_at": "TEXT",
         "type": "TEXT DEFAULT 'payment'",
         "user_id": "TEXT",
-        "investment_id": "TEXT"   # ✅ newly added column
+        "investment_id": "TEXT"
     }
 
     for col, coltype in needed.items():
@@ -169,18 +170,60 @@ def init_db():
                 logger.info("Added column %s to transactions table", col)
             except sqlite3.OperationalError:
                 logger.warning("Could not add column %s (may already exist)", col)
-
     conn.commit()
 
-    # ✅ Backfill 'type' and 'user_id' from metadata (unchanged)
+    # =========================
+    # ✅ LOANS TABLE
+    # =========================
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS loans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            loan_id TEXT UNIQUE,
+            user_id TEXT,
+            amount REAL,
+            interest_rate REAL,
+            status TEXT,
+            issued_at TEXT,
+            due_date TEXT,
+            metadata TEXT
+        )
+    """)
+    conn.commit()
+
+    cur.execute("PRAGMA table_info(loans)")
+    existing_loan_cols = [r[1] for r in cur.fetchall()]
+
+    loan_needed = {
+        "loan_id": "TEXT UNIQUE",
+        "user_id": "TEXT",
+        "amount": "REAL",
+        "interest_rate": "REAL",
+        "status": "TEXT",
+        "issued_at": "TEXT",
+        "due_date": "TEXT",
+        "metadata": "TEXT"
+    }
+
+    for col, coltype in loan_needed.items():
+        if col not in existing_loan_cols:
+            try:
+                cur.execute(f"ALTER TABLE loans ADD COLUMN {col} {coltype}")
+                logger.info("Added column %s to loans table", col)
+            except sqlite3.OperationalError:
+                logger.warning("Could not add column %s (may already exist)", col)
+    conn.commit()
+
+    # =========================
+    # ✅ BACKFILL TRANSACTIONS
+    # =========================
     try:
         cur.execute("SELECT depositId, metadata, type, user_id FROM transactions")
         rows = cur.fetchall()
         updates = []
         for deposit_id, metadata, cur_type, cur_user in rows:
-            new_type, new_user = cur_type, cur_user
+            new_type = cur_type
+            new_user = cur_user
             changed = False
-
             if metadata:
                 try:
                     meta_obj = json.loads(metadata)
@@ -224,35 +267,13 @@ def init_db():
     except Exception:
         logger.exception("Error during migration/backfill pass")
 
-    # -----------------------------
-    # ✅ 2. Create loans table if missing (NEW)
-    # -----------------------------
-    try:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS loans (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                loan_id TEXT UNIQUE,
-                borrower_id TEXT,
-                amount REAL,
-                status TEXT,
-                disbursed_at TEXT,
-                investment_id TEXT,
-                expected_return_date TEXT,
-                interest REAL,
-                created_at TEXT DEFAULT (datetime('now'))
-            )
-        """)
-        conn.commit()
-        logger.info("Loans table checked/created successfully.")
-    except Exception:
-        logger.exception("Error ensuring loans table exists")
-
     conn.close()
 
 
-# ✅ Ensure initialization runs on startup
+# ✅ Run safely within the Flask app context
 with app.app_context():
     init_db()
+
 
 # def init_db():
 #     """
@@ -1200,6 +1221,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
