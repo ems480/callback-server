@@ -172,18 +172,22 @@ def init_db():
                 logger.warning("Could not add column %s (may already exist)", col)
     conn.commit()
 
-    # =========================
-    # ✅ LOANS TABLE
+        # =========================
+    # ✅ LOANS TABLE (Updated)
     # =========================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS loans (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             loan_id TEXT UNIQUE,
             user_id TEXT,
+            phone TEXT,
             amount REAL,
+            interest REAL,
             interest_rate REAL,
+            investment_id TEXT,
             status TEXT,
             issued_at TEXT,
+            expected_return_date TEXT,
             due_date TEXT,
             metadata TEXT
         )
@@ -196,10 +200,14 @@ def init_db():
     loan_needed = {
         "loan_id": "TEXT UNIQUE",
         "user_id": "TEXT",
+        "phone": "TEXT",
         "amount": "REAL",
+        "interest": "REAL",
         "interest_rate": "REAL",
+        "investment_id": "TEXT",
         "status": "TEXT",
         "issued_at": "TEXT",
+        "expected_return_date": "TEXT",
         "due_date": "TEXT",
         "metadata": "TEXT"
     }
@@ -1221,6 +1229,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
