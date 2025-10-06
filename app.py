@@ -113,6 +113,7 @@ def init_db():
     existing_cols = [r[1] for r in cur.fetchall()]
 
     needed = {
+        "reference": "TEXT",
         "phoneNumber": "TEXT",
         "metadata": "TEXT",
         "updated_at": "TEXT",
@@ -1368,6 +1369,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
