@@ -103,7 +103,8 @@ def init_db():
             updated_at TEXT,
             type TEXT DEFAULT 'payment',
             user_id TEXT,
-            investment_id TEXT
+            investment_id TEXT,
+            reference TEXT  -- ✅ added
         )
     """)
     conn.commit()
@@ -1367,6 +1368,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
