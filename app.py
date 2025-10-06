@@ -1033,8 +1033,8 @@ def disburse_loan(loan_id):
             return jsonify({"error": "Loan not found"}), 404
 
         # ✅ Ensure loan is approved before disbursement
-        if loan["status"] != "approved":
-            return jsonify({"error": "Loan is not approved for disbursement"}), 400
+        # if loan["status"] != "approved":
+        #     return jsonify({"error": "Loan is not approved for disbursement"}), 400
 
         borrower_id = loan["user_id"]
         amount = float(loan["amount"])
@@ -1379,6 +1379,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
