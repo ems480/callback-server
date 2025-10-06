@@ -64,21 +64,6 @@ def notify_investor(user_id, message):
     except Exception as e:
         logger.error(f"❌ Failed to notify investor {user_id}: {e}")
 
-def migrate_loans_table():
-    db = get_db()
-    existing_columns = [col["name"] for col in db.execute("PRAGMA table_info(loans)").fetchall()]
-
-    if "disbursed_at" not in existing_columns:
-        db.execute("ALTER TABLE loans ADD COLUMN disbursed_at TEXT")
-        db.commit()
-        print("✅ Added missing column: disbursed_at")
-
-
-with app.app_context():
-    init_db()              # existing
-    migrate_loans_table()  # new
-
-
 def init_db():
     """
     Create the transactions and loans tables if missing and safely add any missing columns.
@@ -409,9 +394,27 @@ def init_loans_table():
 
     conn.commit()
     conn.close()
-
+    
 with app.app_context():
     init_loans_table()
+
+def migrate_loans_table():
+    db = get_db()
+    existing_columns = [col["name"] for col in db.execute("PRAGMA table_info(loans)").fetchall()]
+
+    # ✅ Ensure disbursed_at column exists
+    if "disbursed_at" not in existing_columns:
+        db.execute("ALTER TABLE loans ADD COLUMN disbursed_at TEXT")
+        db.commit()
+        print("✅ Added missing column: disbursed_at")
+
+    db.close()
+
+
+# ✅ run migrations safely once app starts
+with app.app_context():
+    init_db()
+    migrate_loans_table()
 
 
 # -------------------------
@@ -1364,6 +1367,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
