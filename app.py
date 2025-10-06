@@ -64,59 +64,20 @@ def notify_investor(user_id, message):
     except Exception as e:
         logger.error(f"❌ Failed to notify investor {user_id}: {e}")
 
-# def migrate_loans_table():
-#     """
-#     Ensures the 'loans' table exists with all required columns.
-#     If any are missing, they're added safely without deleting data.
-#     """
-#     conn = sqlite3.connect(DATABASE)
-#     cur = conn.cursor()
+def migrate_loans_table():
+    db = get_db()
+    existing_columns = [col["name"] for col in db.execute("PRAGMA table_info(loans)").fetchall()]
 
-#     # Create table if not present
-#     cur.execute("""
-#     CREATE TABLE IF NOT EXISTS loans (
-#         id INTEGER PRIMARY KEY AUTOINCREMENT,
-#         loanId TEXT UNIQUE,
-#         user_id TEXT,
-#         phone TEXT,
-#         investment_id TEXT,
-#         amount REAL,
-#         interest REAL,
-#         status TEXT,
-#         expected_return_date TEXT,
-#         created_at TEXT,
-#         approved_by TEXT
-#     )
-#     """)
+    if "disbursed_at" not in existing_columns:
+        db.execute("ALTER TABLE loans ADD COLUMN disbursed_at TEXT")
+        db.commit()
+        print("✅ Added missing column: disbursed_at")
 
-#     # Check existing columns
-#     cur.execute("PRAGMA table_info(loans)")
-#     existing = [r[1] for r in cur.fetchall()]
 
-#     required = {
-#         "loanId": "TEXT",
-#         "user_id": "TEXT",
-#         "phone": "TEXT",
-#         "investment_id": "TEXT",
-#         "amount": "REAL",
-#         "interest": "REAL",
-#         "status": "TEXT",
-#         "expected_return_date": "TEXT",
-#         "created_at": "TEXT",
-#         "approved_by": "TEXT"
-#     }
+with app.app_context():
+    init_db()              # existing
+    migrate_loans_table()  # new
 
-#     # Add missing columns
-#     for col, coltype in required.items():
-#         if col not in existing:
-#             try:
-#                 cur.execute(f"ALTER TABLE loans ADD COLUMN {col} {coltype}")
-#                 print(f"✅ Added missing column: {col}")
-#             except Exception as e:
-#                 print(f"⚠️ Could not add column {col}: {e}")
-
-#     conn.commit()
-#     conn.close()
 
 def init_db():
     """
@@ -1403,6 +1364,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
