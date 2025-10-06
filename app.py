@@ -977,8 +977,8 @@ def disburse_loan(loan_id):
         data = request.get_json() or {}
         logger.info(f"Disbursing loan {loan_id} with data: {data}")
 
-        # ✅ Fetch loan details
-        loan = db.execute("SELECT * FROM loans WHERE loan_id = ?", (loan_id,)).fetchone()
+        # ✅ Fetch loan details (fixed column name)
+        loan = db.execute("SELECT * FROM loans WHERE loanId = ?", (loan_id,)).fetchone()
         if not loan:
             return jsonify({"error": "Loan not found"}), 404
 
@@ -986,7 +986,7 @@ def disburse_loan(loan_id):
         if loan["status"] != "approved":
             return jsonify({"error": "Loan is not approved for disbursement"}), 400
 
-        borrower_id = loan["borrower_id"]
+        borrower_id = loan["user_id"]
         amount = float(loan["amount"])
 
         # ✅ Fetch borrower wallet
@@ -1005,9 +1005,9 @@ def disburse_loan(loan_id):
             (new_balance, datetime.utcnow().isoformat(), borrower_id)
         )
 
-        # ✅ Mark loan as disbursed
+        # ✅ Mark loan as disbursed (fixed column name)
         db.execute(
-            "UPDATE loans SET status = 'disbursed', disbursed_at = ? WHERE loan_id = ?",
+            "UPDATE loans SET status = 'disbursed', disbursed_at = ? WHERE loanId = ?",
             (datetime.utcnow().isoformat(), loan_id)
         )
 
@@ -1071,6 +1071,109 @@ def disburse_loan(loan_id):
     except Exception as e:
         logger.error(f"Error disbursing loan {loan_id}: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
+# def disburse_loan(loan_id):
+#     try:
+#         db = get_db()  # ✅ Get the database connection
+#         data = request.get_json() or {}
+#         logger.info(f"Disbursing loan {loan_id} with data: {data}")
+
+#         # ✅ Fetch loan details
+#         loan = db.execute("SELECT * FROM loans WHERE loan_id = ?", (loan_id,)).fetchone()
+#         if not loan:
+#             return jsonify({"error": "Loan not found"}), 404
+
+#         # ✅ Ensure loan is approved before disbursement
+#         if loan["status"] != "approved":
+#             return jsonify({"error": "Loan is not approved for disbursement"}), 400
+
+#         borrower_id = loan["borrower_id"]
+#         amount = float(loan["amount"])
+
+#         # ✅ Fetch borrower wallet
+#         borrower_wallet = db.execute(
+#             "SELECT * FROM wallets WHERE user_id = ?", (borrower_id,)
+#         ).fetchone()
+#         if not borrower_wallet:
+#             return jsonify({"error": "Borrower wallet not found"}), 404
+
+#         borrower_balance = float(borrower_wallet["balance"])
+
+#         # ✅ Credit borrower wallet
+#         new_balance = borrower_balance + amount
+#         db.execute(
+#             "UPDATE wallets SET balance = ?, updated_at = ? WHERE user_id = ?",
+#             (new_balance, datetime.utcnow().isoformat(), borrower_id)
+#         )
+
+#         # ✅ Mark loan as disbursed
+#         db.execute(
+#             "UPDATE loans SET status = 'disbursed', disbursed_at = ? WHERE loan_id = ?",
+#             (datetime.utcnow().isoformat(), loan_id)
+#         )
+
+#         # ✅ Record the disbursement transaction
+#         db.execute("""
+#             INSERT INTO transactions (user_id, amount, type, status, reference, created_at, updated_at)
+#             VALUES (?, ?, 'loan_disbursement', 'SUCCESS', ?, ?, ?)
+#         """, (
+#             borrower_id, amount, loan_id,
+#             datetime.utcnow().isoformat(),
+#             datetime.utcnow().isoformat()
+#         ))
+
+#         db.commit()
+
+#         # ✅ Link this loan to one available investment
+#         try:
+#             investment_row = db.execute("""
+#                 SELECT depositId FROM transactions
+#                 WHERE type = 'investment' AND status = 'ACTIVE'
+#                 ORDER BY received_at ASC LIMIT 1
+#             """).fetchone()
+
+#             if investment_row:
+#                 investment_id = investment_row["depositId"]
+
+#                 # ✅ Mark that single investment as LOANED_OUT
+#                 db.execute("""
+#                     UPDATE transactions
+#                     SET status = 'LOANED_OUT', investment_id = ?, updated_at = ?
+#                     WHERE depositId = ?
+#                 """, (loan_id, datetime.utcnow().isoformat(), investment_id))
+#                 db.commit()
+
+#                 # ✅ Notify the investor
+#                 investor_row = db.execute("""
+#                     SELECT user_id FROM transactions
+#                     WHERE depositId = ? AND type = 'investment'
+#                 """, (investment_id,)).fetchone()
+
+#                 if investor_row and investor_row["user_id"]:
+#                     notify_investor(
+#                         investor_row["user_id"],
+#                         f"Your investment {investment_id[:8]} has been loaned out to borrower {loan_id[:8]}."
+#                     )
+
+#                 logger.info(f"Investment {investment_id} linked to loan {loan_id}")
+#             else:
+#                 logger.warning("No available active investment found to link with this loan.")
+
+#         except Exception as e:
+#             logger.error(f"Error linking investment to loan {loan_id}: {e}")
+
+#         return jsonify({
+#             "message": f"Loan {loan_id} successfully disbursed",
+#             "borrower_id": borrower_id,
+#             "amount": amount,
+#             "new_balance": new_balance
+#         }), 200
+
+#     except Exception as e:
+#         logger.error(f"Error disbursing loan {loan_id}: {e}")
+#         return jsonify({"error": str(e)}), 500
 
 
 # @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
@@ -1226,6 +1329,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
