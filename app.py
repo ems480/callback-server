@@ -342,23 +342,25 @@ def pending_loans():
 
 # -------------------------
 # APPROVE LOAN
-# -------------------------
+# # -------------------------
 @app.route("/api/loans/approve/<loan_id>", methods=["POST"])
 def approve_loan(loan_id):
     try:
         db = get_db()
         admin_id = request.json.get("admin_id", "admin_default")
 
-        # Check if loan exists
+        # ✅ Fetch loan by loanId
         loan = db.execute("SELECT * FROM loans WHERE loanId = ?", (loan_id,)).fetchone()
         if not loan:
             return jsonify({"error": "Loan not found"}), 404
 
-        # Prevent double approval
-        if loan["status"].upper() == "APPROVED":
+        # ✅ Prevent double approval
+        if loan["status"] and loan["status"].upper() == "APPROVED":
             return jsonify({"message": "Loan already approved"}), 200
 
-        # Update loan status
+        now = datetime.utcnow().isoformat()
+
+        # ✅ Approve loan
         db.execute("""
             UPDATE loans
             SET status = 'APPROVED',
@@ -366,31 +368,81 @@ def approve_loan(loan_id):
                 approved_at = ?,
                 updated_at = ?
             WHERE loanId = ?
-        """, (
-            admin_id,
-            datetime.utcnow().isoformat(),
-            datetime.utcnow().isoformat(),
-            loan_id
-        ))
-        db.commit()
+        """, (admin_id, now, now, loan_id))
 
-        # Update investor transaction if exists
-        db.execute("""
-            UPDATE transactions
-            SET status = 'LOANED_OUT',
-                updated_at = ?,
-                metadata = COALESCE(metadata, ''),
-                failureMessage = 'Loan Approved',
-                failureCode = 'LOAN'
-            WHERE user_id = ? AND type = 'investment'
-        """, (datetime.utcnow().isoformat(), loan["user_id"]))
-        db.commit()
+        # ✅ Update investor’s transaction using investment_id, not user_id
+        if loan["investment_id"]:
+            db.execute("""
+                UPDATE transactions
+                SET status = 'LOANED_OUT',
+                    updated_at = ?,
+                    failureMessage = 'Loan Approved',
+                    failureCode = 'LOAN'
+                WHERE depositId = ?
+            """, (now, loan["investment_id"]))
+            logger.info(f"✅ Investor transaction {loan['investment_id']} marked as LOANED_OUT.")
 
-        return jsonify({"message": f"Loan {loan_id} approved successfully"}), 200
+            # ✅ Notify investor
+            txn = db.execute("SELECT user_id FROM transactions WHERE depositId=?", (loan["investment_id"],)).fetchone()
+            if txn and txn["user_id"]:
+                notify_investor(txn["user_id"], f"Your investment {loan['investment_id']} has been loaned out.")
+
+        db.commit()
+        return jsonify({"message": f"Loan {loan_id} approved and linked investor updated"}), 200
 
     except Exception as e:
         db.rollback()
+        logger.exception("Error approving loan")
         return jsonify({"error": str(e)}), 500
+
+# @app.route("/api/loans/approve/<loan_id>", methods=["POST"])
+# def approve_loan(loan_id):
+#     try:
+#         db = get_db()
+#         admin_id = request.json.get("admin_id", "admin_default")
+
+#         # Check if loan exists
+#         loan = db.execute("SELECT * FROM loans WHERE loanId = ?", (loan_id,)).fetchone()
+#         if not loan:
+#             return jsonify({"error": "Loan not found"}), 404
+
+#         # Prevent double approval
+#         if loan["status"].upper() == "APPROVED":
+#             return jsonify({"message": "Loan already approved"}), 200
+
+#         # Update loan status
+#         db.execute("""
+#             UPDATE loans
+#             SET status = 'APPROVED',
+#                 approved_by = ?,
+#                 approved_at = ?,
+#                 updated_at = ?
+#             WHERE loanId = ?
+#         """, (
+#             admin_id,
+#             datetime.utcnow().isoformat(),
+#             datetime.utcnow().isoformat(),
+#             loan_id
+#         ))
+#         db.commit()
+
+#         # Update investor transaction if exists
+#         db.execute("""
+#             UPDATE transactions
+#             SET status = 'LOANED_OUT',
+#                 updated_at = ?,
+#                 metadata = COALESCE(metadata, ''),
+#                 failureMessage = 'Loan Approved',
+#                 failureCode = 'LOAN'
+#             WHERE user_id = ? AND type = 'investment'
+#         """, (datetime.utcnow().isoformat(), loan["user_id"]))
+#         db.commit()
+
+#         return jsonify({"message": f"Loan {loan_id} approved successfully"}), 200
+
+#     except Exception as e:
+#         db.rollback()
+#         return jsonify({"error": str(e)}), 500
 
 # -------------------------
 # DISAPPROVE LOAN
@@ -950,6 +1002,16 @@ def disburse_loan(loan_id):
                 #     ORDER BY created_at ASC LIMIT 1
                 # """).fetchone()
 
+                # ✅ Also mark investor's transaction as DISBURSED
+                if loan["investment_id"]:
+                    db.execute("""
+                        UPDATE transactions
+                        SET status = 'DISBURSED', updated_at = ?
+                        WHERE depositId = ?
+                    """, (datetime.utcnow().isoformat(), loan["investment_id"]))
+                    logger.info(f"✅ Investor transaction {loan['investment_id']} marked as DISBURSED.")
+
+
 
                 if investor_row and investor_row["user_id"]:
                     notify_investor(
@@ -1013,6 +1075,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
