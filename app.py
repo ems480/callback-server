@@ -101,6 +101,7 @@ def init_db():
             metadata TEXT,
             received_at TEXT,
             updated_at TEXT,
+            created_at TEXT,
             type TEXT DEFAULT 'payment',
             user_id TEXT,
             investment_id TEXT,
@@ -117,10 +118,20 @@ def init_db():
         "phoneNumber": "TEXT",
         "metadata": "TEXT",
         "updated_at": "TEXT",
+        "created_at": "TEXT",
         "type": "TEXT DEFAULT 'payment'",
         "user_id": "TEXT",
         "investment_id": "TEXT"
     }
+
+    # needed = {
+    #     "reference": "TEXT",
+    #     "investment_id": "TEXT",
+    #     "updated_at": "TEXT",
+    #     "created_at": "TEXT",
+    #     "type": "TEXT DEFAULT 'payment'",
+    #     "user_id": "TEXT"
+    # }
 
     for col, coltype in needed.items():
         if col not in existing_cols:
@@ -1022,16 +1033,17 @@ def disburse_loan(loan_id):
         ).fetchone()
         
         if not borrower_wallet:
-        # ✅ Auto-create wallet for borrower
             db.execute("""
                 INSERT INTO wallets (user_id, balance, created_at, updated_at)
                 VALUES (?, 0, ?, ?)
             """, (borrower_id, datetime.utcnow().isoformat(), datetime.utcnow().isoformat()))
             db.commit()
+            logger.info(f"✅ Created new wallet for borrower {borrower_id}")
+        
             borrower_wallet = db.execute(
                 "SELECT * FROM wallets WHERE user_id = ?", (borrower_id,)
             ).fetchone()
-            logger.info(f"✅ Created new wallet for borrower {borrower_id}")
+
 
         # if not borrower_wallet:
         #     return jsonify({"error": "Borrower wallet not found"}), 404
@@ -1369,6 +1381,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
