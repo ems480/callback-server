@@ -124,15 +124,6 @@ def init_db():
         "investment_id": "TEXT"
     }
 
-    # needed = {
-    #     "reference": "TEXT",
-    #     "investment_id": "TEXT",
-    #     "updated_at": "TEXT",
-    #     "created_at": "TEXT",
-    #     "type": "TEXT DEFAULT 'payment'",
-    #     "user_id": "TEXT"
-    # }
-
     for col, coltype in needed.items():
         if col not in existing_cols:
             try:
@@ -248,129 +239,6 @@ def init_db():
 # ✅ Run safely within the Flask app context
 with app.app_context():
     init_db()
-
-
-# def init_db():
-#     """
-#     Create the transactions table if missing and safely add any missing columns.
-#     Also run a small backfill to populate 'type' and 'user_id' from metadata where possible.
-#     """
-#     conn = sqlite3.connect(DATABASE)
-#     cur = conn.cursor()
-
-#     # Create table with the full set of columns we want to support
-#     cur.execute("""
-#         CREATE TABLE IF NOT EXISTS transactions (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             depositId TEXT UNIQUE,
-#             status TEXT,
-#             amount REAL,
-#             currency TEXT,
-#             phoneNumber TEXT,
-#             provider TEXT,
-#             providerTransactionId TEXT,
-#             failureCode TEXT,
-#             failureMessage TEXT,
-#             metadata TEXT,
-#             received_at TEXT,
-#             updated_at TEXT,
-#             type TEXT DEFAULT 'payment',
-#             user_id TEXT
-#         )
-#     """)
-#     conn.commit()
-
-#     # Inspect columns that actually exist and add any missing ones.
-#     cur.execute("PRAGMA table_info(transactions)")
-#     existing_cols = [r[1] for r in cur.fetchall()]
-
-#     # Add missing columns one-by-one in a safe way
-#     # needed = {
-#     #     "phoneNumber": "TEXT",
-#     #     "metadata": "TEXT",
-#     #     "updated_at": "TEXT",
-#     #     "type": "TEXT DEFAULT 'payment'",
-#     #     "user_id": "TEXT"
-#     # }
-#     needed = {
-#         "phoneNumber": "TEXT",
-#         "metadata": "TEXT",
-#         "updated_at": "TEXT",
-#         "type": "TEXT DEFAULT 'payment'",
-#         "user_id": "TEXT",
-#         "investment_id": "TEXT"   # ✅ NEW
-#     }
-
-#     for col, coltype in needed.items():
-#         if col not in existing_cols:
-#             try:
-#                 cur.execute(f"ALTER TABLE transactions ADD COLUMN {col} {coltype}")
-#                 logger.info("Added column %s to transactions table", col)
-#             except sqlite3.OperationalError:
-#                 # race or already present
-#                 logger.warning("Could not add column %s (may already exist)", col)
-
-#     conn.commit()
-
-#     # Backfill 'type' and 'user_id' from metadata where possible
-#     try:
-#         cur.execute("SELECT depositId, metadata, type, user_id FROM transactions")
-#         rows = cur.fetchall()
-#         updates = []
-#         for deposit_id, metadata, cur_type, cur_user in rows:
-#             new_type = cur_type
-#             new_user = cur_user
-#             changed = False
-#             if metadata:
-#                 try:
-#                     meta_obj = json.loads(metadata)
-#                 except Exception:
-#                     meta_obj = None
-
-#                 if isinstance(meta_obj, list):
-#                     for entry in meta_obj:
-#                         if not isinstance(entry, dict):
-#                             continue
-#                         fn = str(entry.get("fieldName") or "").lower()
-#                         fv = entry.get("fieldValue")
-#                         if fn == "userid" and fv and not new_user:
-#                             new_user = str(fv)
-#                             changed = True
-#                         if fn == "purpose" and isinstance(fv, str) and fv.lower() == "investment":
-#                             if new_type != "investment":
-#                                 new_type = "investment"
-#                                 changed = True
-#                 elif isinstance(meta_obj, dict):
-#                     if "userId" in meta_obj and not new_user:
-#                         new_user = str(meta_obj.get("userId"))
-#                         changed = True
-#                     purpose = meta_obj.get("purpose")
-#                     if isinstance(purpose, str) and purpose.lower() == "investment":
-#                         if new_type != "investment":
-#                             new_type = "investment"
-#                             changed = True
-
-#             # default type to 'payment' if None
-#             if new_type is None:
-#                 new_type = "payment"
-
-#             if changed or (cur_user is None and new_user is not None) or (cur_type is None and new_type):
-#                 updates.append((new_user, new_type, deposit_id))
-
-#         for u, t, dep in updates:
-#             cur.execute("UPDATE transactions SET user_id = ?, type = ? WHERE depositId = ?", (u, t, dep))
-#         if updates:
-#             conn.commit()
-#             logger.info("Backfilled %d transactions with user_id/type from metadata.", len(updates))
-#     except Exception:
-#         logger.exception("Error during migration/backfill pass")
-
-#     conn.close()
-
-
-# with app.app_context():
-#     init_db()
-
 
 def get_db():
     """
@@ -524,31 +392,6 @@ def approve_loan(loan_id):
         db.rollback()
         return jsonify({"error": str(e)}), 500
 
-
-# @app.route("/api/loans/approve/<loan_id>", methods=["POST"])
-# def approve_loan(loan_id):
-#     admin_id = request.json.get("admin_id", "admin_default")
-#     db = get_db()
-#     db.execute("UPDATE loans SET status='APPROVED', approved_by=? WHERE loanId=?", (admin_id, loan_id))
-#     db.commit()
-
-#     # update investor transaction status to LOANED_OUT if exists
-#     loan = db.execute("SELECT * FROM loans WHERE loanId=?", (loan_id,)).fetchone()
-#     if loan:
-#         db.execute("""
-#             UPDATE transactions
-#             SET status='LOANED_OUT',
-#                 updated_at=?,
-#                 metadata=COALESCE(metadata, ''),
-#                 failureMessage='Loan Approved',
-#                 failureCode='LOAN'
-#             WHERE user_id=? AND type='investment'
-#         """, (datetime.utcnow().isoformat(), loan["user_id"]))
-#         db.commit()
-
-#     return jsonify({"message": "Loan approved"}), 200
-
-
 # -------------------------
 # DISAPPROVE LOAN
 # -------------------------
@@ -569,12 +412,6 @@ def user_loans(user_id):
     rows = db.execute("SELECT * FROM loans WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall()
     results = [dict(row) for row in rows]
     return jsonify(results), 200
-
-
-
-
-
-
 
 @app.teardown_appcontext
 def close_connection(exception):
@@ -975,9 +812,7 @@ def debug_transactions():
                 pass
         results.append(res)
     return jsonify(results), 200
-
-
-
+    
 #-----------------------------------
 # GET PENDING REQUESTS
 #----------------------------------
@@ -1044,10 +879,6 @@ def disburse_loan(loan_id):
                 "SELECT * FROM wallets WHERE user_id = ?", (borrower_id,)
             ).fetchone()
 
-
-        # if not borrower_wallet:
-        #     return jsonify({"error": "Borrower wallet not found"}), 404
-
         borrower_balance = float(borrower_wallet["balance"])
 
         # ✅ Credit borrower wallet
@@ -1095,10 +926,16 @@ def disburse_loan(loan_id):
                 db.commit()
 
                 # ✅ Notify the investor
-                investor_row = db.execute("""
-                    SELECT user_id FROM transactions
-                    WHERE depositId = ? AND type = 'investment'
-                """, (investment_id,)).fetchone()
+                # investor_row = db.execute("""
+                #     SELECT user_id FROM transactions
+                #     WHERE depositId = ? AND type = 'investment'
+                # """, (investment_id,)).fetchone()
+                investment_row = db.execute("""
+                    SELECT reference FROM transactions
+                    WHERE type = 'investment' AND status = 'ACTIVE'
+                    ORDER BY created_at ASC LIMIT 1
+                """).fetchone()
+
 
                 if investor_row and investor_row["user_id"]:
                     notify_investor(
@@ -1123,219 +960,6 @@ def disburse_loan(loan_id):
     except Exception as e:
         logger.error(f"Error disbursing loan {loan_id}: {e}")
         return jsonify({"error": str(e)}), 500
-
-
-# @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
-# def disburse_loan(loan_id):
-#     try:
-#         db = get_db()  # ✅ Get the database connection
-#         data = request.get_json() or {}
-#         logger.info(f"Disbursing loan {loan_id} with data: {data}")
-
-#         # ✅ Fetch loan details
-#         loan = db.execute("SELECT * FROM loans WHERE loan_id = ?", (loan_id,)).fetchone()
-#         if not loan:
-#             return jsonify({"error": "Loan not found"}), 404
-
-#         # ✅ Ensure loan is approved before disbursement
-#         if loan["status"] != "approved":
-#             return jsonify({"error": "Loan is not approved for disbursement"}), 400
-
-#         borrower_id = loan["borrower_id"]
-#         amount = float(loan["amount"])
-
-#         # ✅ Fetch borrower wallet
-#         borrower_wallet = db.execute(
-#             "SELECT * FROM wallets WHERE user_id = ?", (borrower_id,)
-#         ).fetchone()
-#         if not borrower_wallet:
-#             return jsonify({"error": "Borrower wallet not found"}), 404
-
-#         borrower_balance = float(borrower_wallet["balance"])
-
-#         # ✅ Credit borrower wallet
-#         new_balance = borrower_balance + amount
-#         db.execute(
-#             "UPDATE wallets SET balance = ?, updated_at = ? WHERE user_id = ?",
-#             (new_balance, datetime.utcnow().isoformat(), borrower_id)
-#         )
-
-#         # ✅ Mark loan as disbursed
-#         db.execute(
-#             "UPDATE loans SET status = 'disbursed', disbursed_at = ? WHERE loan_id = ?",
-#             (datetime.utcnow().isoformat(), loan_id)
-#         )
-
-#         # ✅ Record the disbursement transaction
-#         db.execute("""
-#             INSERT INTO transactions (user_id, amount, type, status, reference, created_at, updated_at)
-#             VALUES (?, ?, 'loan_disbursement', 'SUCCESS', ?, ?, ?)
-#         """, (
-#             borrower_id, amount, loan_id,
-#             datetime.utcnow().isoformat(),
-#             datetime.utcnow().isoformat()
-#         ))
-
-#         db.commit()
-
-#         # ✅ Link this loan to one available investment
-#         try:
-#             investment_row = db.execute("""
-#                 SELECT depositId FROM transactions
-#                 WHERE type = 'investment' AND status = 'ACTIVE'
-#                 ORDER BY received_at ASC LIMIT 1
-#             """).fetchone()
-
-#             if investment_row:
-#                 investment_id = investment_row["depositId"]
-
-#                 # ✅ Mark that single investment as LOANED_OUT
-#                 db.execute("""
-#                     UPDATE transactions
-#                     SET status = 'LOANED_OUT', investment_id = ?, updated_at = ?
-#                     WHERE depositId = ?
-#                 """, (loan_id, datetime.utcnow().isoformat(), investment_id))
-#                 db.commit()
-
-#                 # ✅ Notify the investor
-#                 investor_row = db.execute("""
-#                     SELECT user_id FROM transactions
-#                     WHERE depositId = ? AND type = 'investment'
-#                 """, (investment_id,)).fetchone()
-
-#                 if investor_row and investor_row["user_id"]:
-#                     notify_investor(
-#                         investor_row["user_id"],
-#                         f"Your investment {investment_id[:8]} has been loaned out to borrower {loan_id[:8]}."
-#                     )
-
-#                 logger.info(f"Investment {investment_id} linked to loan {loan_id}")
-#             else:
-#                 logger.warning("No available active investment found to link with this loan.")
-
-#         except Exception as e:
-#             logger.error(f"Error linking investment to loan {loan_id}: {e}")
-
-#         return jsonify({
-#             "message": f"Loan {loan_id} successfully disbursed",
-#             "borrower_id": borrower_id,
-#             "amount": amount,
-#             "new_balance": new_balance
-#         }), 200
-
-#     except Exception as e:
-#         logger.error(f"Error disbursing loan {loan_id}: {e}")
-#         return jsonify({"error": str(e)}), 500
-
-
-# @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
-# def disburse_loan(loan_id):
-#     """
-#     Admin approves and disburses a pending loan via PawaPay payout.
-#     - trims customerMessage to <=22 chars (PawaPay requirement)
-#     - returns the full payout_response so client can show details
-#     """
-#     data = request.json or {}
-#     admin_id = data.get("admin_id", "admin_default")
-
-#     db = get_db()
-#     db.row_factory = sqlite3.Row
-
-#     loan_row = db.execute("SELECT * FROM loans WHERE loanId=?", (loan_id,)).fetchone()
-#     if not loan_row:
-#         return jsonify({"error": "Loan not found"}), 404
-
-#     # convert sqlite3.Row -> dict for .get() usage
-#     loan = dict(loan_row)
-
-#     if loan.get("status") != "PENDING":
-#         return jsonify({"error": f"Loan already {loan.get('status')}"}), 400
-
-#     # Prefer phone saved on loan, else fallback to user's latest investment phone
-#     phone = loan.get("phone")
-#     if not phone:
-#         user_id = loan.get("user_id")
-#         t = db.execute("""
-#             SELECT phoneNumber FROM transactions 
-#             WHERE user_id=? AND type='investment'
-#             ORDER BY received_at DESC LIMIT 1
-#         """, (user_id,)).fetchone()
-#         if t:
-#             phone = t["phoneNumber"]
-#         else:
-#             return jsonify({"error": "No phone number found for user"}), 400
-
-#     # Build a short customer message (PawaPay requires <=22 chars)
-#     # Use a compact form like "Loan:abcd1234" (8 chars of id). Adjust if you want different format.
-#     short_msg = f"Loan:{loan_id[:8]}"
-#     if len(short_msg) > 22:
-#         short_msg = short_msg[:22]
-
-#     # Build payout payload (metadata as fieldName/fieldValue so callback parsing is consistent)
-#     # --- Build safe PawaPay-compliant payout ---
-#     payout_id = str(uuid.uuid4())
-#     payload = {
-#         "payoutId": payout_id,
-#         "recipient": {
-#             "type": "MMO",
-#             "accountDetails": {
-#                 "phoneNumber": str(phone),
-#                 "provider": "MTN_MOMO_ZMB"
-#             }
-#         },
-#         "amount": str(loan.get("amount")),
-#         "currency": "ZMW"
-#     }
-    
-#     headers = {
-#         "Authorization": f"Bearer {API_TOKEN}",
-#         "Content-Type": "application/json"
-#     }
-    
-#     try:
-#         resp = requests.post(PAWAPAY_PAYOUT_URL, json=payload, headers=headers, timeout=20)
-#         payout_response = resp.json()
-#     except Exception as e:
-#         return jsonify({"error": f"Payout request failed: {str(e)}"}), 500
-    
-#     payout_status = payout_response.get("status", "UNKNOWN")
-    
-#     # --- Update DB ---
-#     db.execute(
-#         "UPDATE loans SET status=?, approved_by=? WHERE loanId=?",
-#         (payout_status, admin_id, loan_id)
-#     )
-#     db.commit()
-    
-#     # ----------------------------------------------------
-#     # 🔁 Update investment status to 'LOANED_OUT' if linked + notify investor
-#     # ----------------------------------------------------
-#     if payout_status in ["SUCCESS", "ACCEPTED", "PENDING"]:
-#         try:
-#             db.execute("""
-#                 UPDATE transactions
-#                 SET status = 'LOANED_OUT', updated_at = ?
-#                 WHERE type = 'investment' AND user_id = ?
-#             """, (datetime.utcnow().isoformat(), loan["user_id"]))
-#             db.commit()
-
-#             # Notify investor
-#             notify_investor(
-#                 loan["user_id"],
-#                 f"Your investment linked to loan {loan_id[:8]} has been loaned out."
-#             )
-
-#             print(f"✅ Investment for Loan {loan_id} marked as LOANED_OUT & investor notified.")
-#         except Exception as e:
-#             print("⚠️ Failed to update investment/notify investor:", str(e))
-            
-#     return jsonify({
-#         "loanId": loan_id,
-#         "payoutId": payout_id,
-#         "status": payout_status,
-#         "payout_response": payout_response
-#     }), 200
-
 
 # -------------------------
 # REJECT LOAN (ADMIN ACTION)
@@ -1375,37 +999,3 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
-# if __name__ == "__main__":
-#     with app.app_context():
-#         init_db()              # existing DB initialization
-#         migrate_loans_table()  # ✅ ensure loans table has all columns
-#     app.run(host="0.0.0.0", port=5000, debug=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
