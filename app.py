@@ -118,144 +118,16 @@ def notify_investor(user_id, message):
 #     conn.commit()
 #     conn.close()
 
-def init_db():
-    """
-    Create the transactions table if missing and safely add any missing columns.
-    Also create loans table with needed columns.
-    Run a small backfill to populate 'type' and 'user_id' from metadata where possible.
-    """
-    conn = sqlite3.connect(DATABASE)
-    cur = conn.cursor()
-
-    # ✅ Create transactions table if missing
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            depositId TEXT UNIQUE,
-            status TEXT,
-            amount REAL,
-            currency TEXT,
-            phoneNumber TEXT,
-            provider TEXT,
-            providerTransactionId TEXT,
-            failureCode TEXT,
-            failureMessage TEXT,
-            metadata TEXT,
-            received_at TEXT,
-            updated_at TEXT,
-            type TEXT DEFAULT 'payment',
-            user_id TEXT
-        )
-    """)
-    conn.commit()
-
-    # ✅ Ensure all required columns exist in transactions
-    cur.execute("PRAGMA table_info(transactions)")
-    existing_cols = [r[1] for r in cur.fetchall()]
-
-    needed = {
-        "phoneNumber": "TEXT",
-        "metadata": "TEXT",
-        "updated_at": "TEXT",
-        "type": "TEXT DEFAULT 'payment'",
-        "user_id": "TEXT",
-        "investment_id": "TEXT"  # ✅ NEW
-    }
-
-    for col, coltype in needed.items():
-        if col not in existing_cols:
-            try:
-                cur.execute(f"ALTER TABLE transactions ADD COLUMN {col} {coltype}")
-                logger.info("Added column %s to transactions table", col)
-            except sqlite3.OperationalError:
-                logger.warning("Could not add column %s (may already exist)", col)
-
-    conn.commit()
-
-    # ✅ Create loans table if not exists
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS loans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            loan_id TEXT UNIQUE,
-            borrower_id TEXT,
-            amount REAL,
-            status TEXT DEFAULT 'pending',
-            disbursed_at TEXT,
-            investment_id TEXT,
-            FOREIGN KEY (investment_id) REFERENCES transactions(depositId)
-        )
-    """)
-    conn.commit()
-
-    # ✅ Backfill 'type' and 'user_id' from metadata
-    try:
-        cur.execute("SELECT depositId, metadata, type, user_id FROM transactions")
-        rows = cur.fetchall()
-        updates = []
-        for deposit_id, metadata, cur_type, cur_user in rows:
-            new_type = cur_type
-            new_user = cur_user
-            changed = False
-            if metadata:
-                try:
-                    meta_obj = json.loads(metadata)
-                except Exception:
-                    meta_obj = None
-
-                if isinstance(meta_obj, list):
-                    for entry in meta_obj:
-                        if not isinstance(entry, dict):
-                            continue
-                        fn = str(entry.get("fieldName") or "").lower()
-                        fv = entry.get("fieldValue")
-                        if fn == "userid" and fv and not new_user:
-                            new_user = str(fv)
-                            changed = True
-                        if fn == "purpose" and isinstance(fv, str) and fv.lower() == "investment":
-                            if new_type != "investment":
-                                new_type = "investment"
-                                changed = True
-                elif isinstance(meta_obj, dict):
-                    if "userId" in meta_obj and not new_user:
-                        new_user = str(meta_obj.get("userId"))
-                        changed = True
-                    purpose = meta_obj.get("purpose")
-                    if isinstance(purpose, str) and purpose.lower() == "investment":
-                        if new_type != "investment":
-                            new_type = "investment"
-                            changed = True
-
-            # default type to 'payment' if None
-            if new_type is None:
-                new_type = "payment"
-
-            if changed or (cur_user is None and new_user is not None) or (cur_type is None and new_type):
-                updates.append((new_user, new_type, deposit_id))
-
-        for u, t, dep in updates:
-            cur.execute("UPDATE transactions SET user_id = ?, type = ? WHERE depositId = ?", (u, t, dep))
-        if updates:
-            conn.commit()
-            logger.info("Backfilled %d transactions with user_id/type from metadata.", len(updates))
-    except Exception:
-        logger.exception("Error during migration/backfill pass")
-
-    conn.close()
-
-
-# ✅ Ensure DB initializes when app starts
-with app.app_context():
-    init_db()
-
 # def init_db():
 #     """
 #     Create the transactions table if missing and safely add any missing columns.
-#     Also run a small backfill to populate 'type' and 'user_id' from metadata where possible.
+#     Also create loans table with needed columns.
+#     Run a small backfill to populate 'type' and 'user_id' from metadata where possible.
 #     """
 #     conn = sqlite3.connect(DATABASE)
 #     cur = conn.cursor()
 
-#     # Create table with the full set of columns we want to support
+#     # ✅ Create transactions table if missing
 #     cur.execute("""
 #         CREATE TABLE IF NOT EXISTS transactions (
 #             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -277,25 +149,17 @@ with app.app_context():
 #     """)
 #     conn.commit()
 
-#     # Inspect columns that actually exist and add any missing ones.
+#     # ✅ Ensure all required columns exist in transactions
 #     cur.execute("PRAGMA table_info(transactions)")
 #     existing_cols = [r[1] for r in cur.fetchall()]
 
-#     # Add missing columns one-by-one in a safe way
-#     # needed = {
-#     #     "phoneNumber": "TEXT",
-#     #     "metadata": "TEXT",
-#     #     "updated_at": "TEXT",
-#     #     "type": "TEXT DEFAULT 'payment'",
-#     #     "user_id": "TEXT"
-#     # }
 #     needed = {
 #         "phoneNumber": "TEXT",
 #         "metadata": "TEXT",
 #         "updated_at": "TEXT",
 #         "type": "TEXT DEFAULT 'payment'",
 #         "user_id": "TEXT",
-#         "investment_id": "TEXT"   # ✅ NEW
+#         "investment_id": "TEXT"  # ✅ NEW
 #     }
 
 #     for col, coltype in needed.items():
@@ -304,12 +168,26 @@ with app.app_context():
 #                 cur.execute(f"ALTER TABLE transactions ADD COLUMN {col} {coltype}")
 #                 logger.info("Added column %s to transactions table", col)
 #             except sqlite3.OperationalError:
-#                 # race or already present
 #                 logger.warning("Could not add column %s (may already exist)", col)
 
 #     conn.commit()
 
-#     # Backfill 'type' and 'user_id' from metadata where possible
+#     # ✅ Create loans table if not exists
+#     cur.execute("""
+#         CREATE TABLE IF NOT EXISTS loans (
+#             id INTEGER PRIMARY KEY AUTOINCREMENT,
+#             loan_id TEXT UNIQUE,
+#             borrower_id TEXT,
+#             amount REAL,
+#             status TEXT DEFAULT 'pending',
+#             disbursed_at TEXT,
+#             investment_id TEXT,
+#             FOREIGN KEY (investment_id) REFERENCES transactions(depositId)
+#         )
+#     """)
+#     conn.commit()
+
+#     # ✅ Backfill 'type' and 'user_id' from metadata
 #     try:
 #         cur.execute("SELECT depositId, metadata, type, user_id FROM transactions")
 #         rows = cur.fetchall()
@@ -365,8 +243,130 @@ with app.app_context():
 #     conn.close()
 
 
+# # ✅ Ensure DB initializes when app starts
 # with app.app_context():
 #     init_db()
+
+def init_db():
+    """
+    Create the transactions table if missing and safely add any missing columns.
+    Also run a small backfill to populate 'type' and 'user_id' from metadata where possible.
+    """
+    conn = sqlite3.connect(DATABASE)
+    cur = conn.cursor()
+
+    # Create table with the full set of columns we want to support
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            depositId TEXT UNIQUE,
+            status TEXT,
+            amount REAL,
+            currency TEXT,
+            phoneNumber TEXT,
+            provider TEXT,
+            providerTransactionId TEXT,
+            failureCode TEXT,
+            failureMessage TEXT,
+            metadata TEXT,
+            received_at TEXT,
+            updated_at TEXT,
+            type TEXT DEFAULT 'payment',
+            user_id TEXT
+        )
+    """)
+    conn.commit()
+
+    # Inspect columns that actually exist and add any missing ones.
+    cur.execute("PRAGMA table_info(transactions)")
+    existing_cols = [r[1] for r in cur.fetchall()]
+
+    # Add missing columns one-by-one in a safe way
+    # needed = {
+    #     "phoneNumber": "TEXT",
+    #     "metadata": "TEXT",
+    #     "updated_at": "TEXT",
+    #     "type": "TEXT DEFAULT 'payment'",
+    #     "user_id": "TEXT"
+    # }
+    needed = {
+        "phoneNumber": "TEXT",
+        "metadata": "TEXT",
+        "updated_at": "TEXT",
+        "type": "TEXT DEFAULT 'payment'",
+        "user_id": "TEXT",
+        "investment_id": "TEXT"   # ✅ NEW
+    }
+
+    for col, coltype in needed.items():
+        if col not in existing_cols:
+            try:
+                cur.execute(f"ALTER TABLE transactions ADD COLUMN {col} {coltype}")
+                logger.info("Added column %s to transactions table", col)
+            except sqlite3.OperationalError:
+                # race or already present
+                logger.warning("Could not add column %s (may already exist)", col)
+
+    conn.commit()
+
+    # Backfill 'type' and 'user_id' from metadata where possible
+    try:
+        cur.execute("SELECT depositId, metadata, type, user_id FROM transactions")
+        rows = cur.fetchall()
+        updates = []
+        for deposit_id, metadata, cur_type, cur_user in rows:
+            new_type = cur_type
+            new_user = cur_user
+            changed = False
+            if metadata:
+                try:
+                    meta_obj = json.loads(metadata)
+                except Exception:
+                    meta_obj = None
+
+                if isinstance(meta_obj, list):
+                    for entry in meta_obj:
+                        if not isinstance(entry, dict):
+                            continue
+                        fn = str(entry.get("fieldName") or "").lower()
+                        fv = entry.get("fieldValue")
+                        if fn == "userid" and fv and not new_user:
+                            new_user = str(fv)
+                            changed = True
+                        if fn == "purpose" and isinstance(fv, str) and fv.lower() == "investment":
+                            if new_type != "investment":
+                                new_type = "investment"
+                                changed = True
+                elif isinstance(meta_obj, dict):
+                    if "userId" in meta_obj and not new_user:
+                        new_user = str(meta_obj.get("userId"))
+                        changed = True
+                    purpose = meta_obj.get("purpose")
+                    if isinstance(purpose, str) and purpose.lower() == "investment":
+                        if new_type != "investment":
+                            new_type = "investment"
+                            changed = True
+
+            # default type to 'payment' if None
+            if new_type is None:
+                new_type = "payment"
+
+            if changed or (cur_user is None and new_user is not None) or (cur_type is None and new_type):
+                updates.append((new_user, new_type, deposit_id))
+
+        for u, t, dep in updates:
+            cur.execute("UPDATE transactions SET user_id = ?, type = ? WHERE depositId = ?", (u, t, dep))
+        if updates:
+            conn.commit()
+            logger.info("Backfilled %d transactions with user_id/type from metadata.", len(updates))
+    except Exception:
+        logger.exception("Error during migration/backfill pass")
+
+    conn.close()
+
+
+with app.app_context():
+    init_db()
 
 
 def get_db():
@@ -1193,6 +1193,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
