@@ -1055,7 +1055,19 @@ def disburse_loan(loan_id):
             "SELECT * FROM wallets WHERE user_id = ?", (borrower_id,)
         ).fetchone()
         if not borrower_wallet:
-            return jsonify({"error": "Borrower wallet not found"}), 404
+        # ✅ Auto-create wallet for borrower
+        db.execute("""
+            INSERT INTO wallets (user_id, balance, created_at, updated_at)
+            VALUES (?, 0, ?, ?)
+        """, (borrower_id, datetime.utcnow().isoformat(), datetime.utcnow().isoformat()))
+        db.commit()
+        borrower_wallet = db.execute(
+            "SELECT * FROM wallets WHERE user_id = ?", (borrower_id,)
+        ).fetchone()
+        logger.info(f"✅ Created new wallet for borrower {borrower_id}")
+
+        # if not borrower_wallet:
+        #     return jsonify({"error": "Borrower wallet not found"}), 404
 
         borrower_balance = float(borrower_wallet["balance"])
 
@@ -1390,6 +1402,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
