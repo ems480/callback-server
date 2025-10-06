@@ -127,7 +127,7 @@ def init_db():
     cur = conn.cursor()
 
     # Create wallets table if not exists
-    curs.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS wallets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
@@ -1390,6 +1390,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
