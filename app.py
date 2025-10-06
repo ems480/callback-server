@@ -915,7 +915,9 @@ def disburse_loan(loan_id):
             """).fetchone()
 
             if investment_row:
-                investment_id = investment_row["depositId"]
+                # investment_id = investment_row["depositId"]
+                investment_id = investment_row["reference"]
+
 
                 # ✅ Mark that single investment as LOANED_OUT
                 db.execute("""
@@ -999,3 +1001,4 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
