@@ -126,6 +126,17 @@ def init_db():
     conn = sqlite3.connect(DATABASE)
     cur = conn.cursor()
 
+    # Create wallets table if not exists
+    curs.execute("""
+        CREATE TABLE IF NOT EXISTS wallets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            balance REAL DEFAULT 0,
+            currency TEXT DEFAULT 'ZMW',
+            updated_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     # =========================
     # ✅ TRANSACTIONS TABLE
     # =========================
@@ -1379,6 +1390,7 @@ if __name__ == "__main__":
 #         init_db()              # existing DB initialization
 #         migrate_loans_table()  # ✅ ensure loans table has all columns
 #     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
