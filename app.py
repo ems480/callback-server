@@ -910,7 +910,7 @@ def disburse_loan(loan_id):
         try:
             investment_row = db.execute("""
                 SELECT depositId FROM transactions
-                WHERE type = 'investment' AND status = 'ACTIVE'
+                WHERE type = 'investment' AND status = 'COMPLETED'
                 ORDER BY received_at ASC LIMIT 1
             """).fetchone()
 
@@ -1001,4 +1001,5 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
