@@ -28,274 +28,54 @@ PAWAPAY_PAYOUT_URL = (
 # -------------------------
 # DATABASE
 # -------------------------
-DATABASE = os.path.join(os.path.dirname(__file__), "transactions.db")
+DATABASE = os.path.join(os.path.dirname(__file__), "estack.db")
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# JUST ADDED 1___________________________________________
-def notify_investor(user_id, message):
-    """
-    Notify investor of investment status change.
-    In real systems this could send email, SMS, or push.
-    For now, we just log and store in a notifications table.
-    """
-    try:
-        conn = sqlite3.connect(DATABASE)
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS notifications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT,
-                message TEXT,
-                created_at TEXT
-            )
-        """)
-        conn.commit()
-
-        cur.execute("""
-            INSERT INTO notifications (user_id, message, created_at)
-            VALUES (?, ?, ?)
-        """, (user_id, message, datetime.utcnow().isoformat()))
-        conn.commit()
-        conn.close()
-
-        logger.info(f"📢 Notification sent to investor {user_id}: {message}")
-    except Exception as e:
-        logger.error(f"❌ Failed to notify investor {user_id}: {e}")
+# =========================
+# ✅ DATABASE CONFIG
+# =========================
+# DATABASE = os.path.join(os.path.dirname(__file__), "estack.db")
 
 def init_db():
     """
-    Create the transactions and loans tables if missing and safely add any missing columns.
-    Also run a small backfill to populate 'type' and 'user_id' from metadata where possible.
+    Create the estack_transactions table if missing.
+    Stores combined transaction info and status only.
     """
     conn = sqlite3.connect(DATABASE)
     cur = conn.cursor()
 
-    # Create wallets table if not exists
+    # ✅ Create the single table
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS wallets (
+        CREATE TABLE IF NOT EXISTS estack_transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            balance REAL DEFAULT 0,
-            currency TEXT DEFAULT 'ZMW',
-            updated_at TEXT,
+            name_of_transaction TEXT NOT NULL,  -- e.g. "K1000 | user_123 | DEP4567"
+            status TEXT NOT NULL,               -- e.g. "invested", "loaned_out", "repaid"
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # =========================
-    # ✅ TRANSACTIONS TABLE
-    # =========================
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            depositId TEXT UNIQUE,
-            status TEXT,
-            amount REAL,
-            currency TEXT,
-            phoneNumber TEXT,
-            provider TEXT,
-            providerTransactionId TEXT,
-            failureCode TEXT,
-            failureMessage TEXT,
-            metadata TEXT,
-            received_at TEXT,
-            updated_at TEXT,
-            created_at TEXT,
-            type TEXT DEFAULT 'payment',
-            user_id TEXT,
-            investment_id TEXT,
-            reference TEXT  -- ✅ added
-        )
-    """)
-    conn.commit()
-
-    cur.execute("PRAGMA table_info(transactions)")
-    existing_cols = [r[1] for r in cur.fetchall()]
-
-    needed = {
-        "reference": "TEXT",
-        "phoneNumber": "TEXT",
-        "metadata": "TEXT",
-        "updated_at": "TEXT",
-        "created_at": "TEXT",
-        "type": "TEXT DEFAULT 'payment'",
-        "user_id": "TEXT",
-        "investment_id": "TEXT"
-    }
-
-    for col, coltype in needed.items():
-        if col not in existing_cols:
-            try:
-                cur.execute(f"ALTER TABLE transactions ADD COLUMN {col} {coltype}")
-                logger.info("Added column %s to transactions table", col)
-            except sqlite3.OperationalError:
-                logger.warning("Could not add column %s (may already exist)", col)
-    conn.commit()
-
-        # =========================
-    # ✅ LOANS TABLE (matches code)
-    # =========================
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS loans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            loanId TEXT UNIQUE,
-            user_id TEXT,
-            investment_id TEXT,
-            amount REAL,
-            interest REAL,
-            status TEXT,
-            expected_return_date TEXT,
-            created_at TEXT,
-            phone TEXT,
-            metadata TEXT
-        )
-    """)
-    conn.commit()
-
-    cur.execute("PRAGMA table_info(loans)")
-    existing_loan_cols = [r[1] for r in cur.fetchall()]
-
-    loan_needed = {
-        "loanId": "TEXT UNIQUE",
-        "user_id": "TEXT",
-        "investment_id": "TEXT",
-        "amount": "REAL",
-        "interest": "REAL",
-        "status": "TEXT",
-        "expected_return_date": "TEXT",
-        "created_at": "TEXT",
-        "phone": "TEXT",
-        "metadata": "TEXT"
-    }
-
-    for col, coltype in loan_needed.items():
-        if col not in existing_loan_cols:
-            try:
-                cur.execute(f"ALTER TABLE loans ADD COLUMN {col} {coltype}")
-                logger.info("Added column %s to loans table", col)
-            except sqlite3.OperationalError:
-                logger.warning("Could not add column %s (may already exist)", col)
 
     conn.commit()
-
-    # =========================
-    # ✅ BACKFILL TRANSACTIONS
-    # =========================
-    try:
-        cur.execute("SELECT depositId, metadata, type, user_id FROM transactions")
-        rows = cur.fetchall()
-        updates = []
-        for deposit_id, metadata, cur_type, cur_user in rows:
-            new_type = cur_type
-            new_user = cur_user
-            changed = False
-            if metadata:
-                try:
-                    meta_obj = json.loads(metadata)
-                except Exception:
-                    meta_obj = None
-
-                if isinstance(meta_obj, list):
-                    for entry in meta_obj:
-                        if not isinstance(entry, dict):
-                            continue
-                        fn = str(entry.get("fieldName") or "").lower()
-                        fv = entry.get("fieldValue")
-                        if fn == "userid" and fv and not new_user:
-                            new_user = str(fv)
-                            changed = True
-                        if fn == "purpose" and isinstance(fv, str) and fv.lower() == "investment":
-                            if new_type != "investment":
-                                new_type = "investment"
-                                changed = True
-                elif isinstance(meta_obj, dict):
-                    if "userId" in meta_obj and not new_user:
-                        new_user = str(meta_obj.get("userId"))
-                        changed = True
-                    purpose = meta_obj.get("purpose")
-                    if isinstance(purpose, str) and purpose.lower() == "investment":
-                        if new_type != "investment":
-                            new_type = "investment"
-                            changed = True
-
-            if new_type is None:
-                new_type = "payment"
-
-            if changed or (cur_user is None and new_user is not None) or (cur_type is None and new_type):
-                updates.append((new_user, new_type, deposit_id))
-
-        for u, t, dep in updates:
-            cur.execute("UPDATE transactions SET user_id = ?, type = ? WHERE depositId = ?", (u, t, dep))
-        if updates:
-            conn.commit()
-            logger.info("Backfilled %d transactions with user_id/type from metadata.", len(updates))
-    except Exception:
-        logger.exception("Error during migration/backfill pass")
-
     conn.close()
+    print("✅ estack.db initialized with estack_transactions table.")
 
 
-# ✅ Run safely within the Flask app context
+# ✅ Initialize database once Flask app starts
 with app.app_context():
     init_db()
+
 
 def get_db():
     """
     Return a DB connection scoped to the Flask request context.
-    Row factory is sqlite3.Row for dict-like rows.
+    Row factory is sqlite3.Row for dict-like access.
     """
     db = getattr(g, "_database", None)
     if db is None:
         db = g._database = sqlite3.connect(DATABASE)
         db.row_factory = sqlite3.Row
     return db
-
-# -------------------------
-# LOANS TABLE INIT
-# -------------------------
-def init_loans_table():
-    conn = sqlite3.connect(DATABASE)
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS loans (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        loanId TEXT UNIQUE,
-        user_id TEXT,
-        phone TEXT,                -- 🔹 NEW: borrower's phone number for payouts
-        investment_id TEXT,        -- 🔹 links this loan to an investment
-        amount REAL,
-        interest REAL,
-        status TEXT,               -- PENDING, APPROVED, DISAPPROVED, PAID
-        expected_return_date TEXT,
-        created_at TEXT,
-        approved_by TEXT
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-    
-with app.app_context():
-    init_loans_table()
-
-def migrate_loans_table():
-    db = get_db()
-    existing_columns = [col["name"] for col in db.execute("PRAGMA table_info(loans)").fetchall()]
-
-    # ✅ Ensure disbursed_at column exists
-    if "disbursed_at" not in existing_columns:
-        db.execute("ALTER TABLE loans ADD COLUMN disbursed_at TEXT")
-        db.commit()
-        print("✅ Added missing column: disbursed_at")
-
-    db.close()
-
-
-# ✅ run migrations safely once app starts
-with app.app_context():
-    init_db()
-    migrate_loans_table()
 
 
 # -------------------------
@@ -395,54 +175,6 @@ def approve_loan(loan_id):
         logger.exception("Error approving loan")
         return jsonify({"error": str(e)}), 500
 
-# @app.route("/api/loans/approve/<loan_id>", methods=["POST"])
-# def approve_loan(loan_id):
-#     try:
-#         db = get_db()
-#         admin_id = request.json.get("admin_id", "admin_default")
-
-#         # Check if loan exists
-#         loan = db.execute("SELECT * FROM loans WHERE loanId = ?", (loan_id,)).fetchone()
-#         if not loan:
-#             return jsonify({"error": "Loan not found"}), 404
-
-#         # Prevent double approval
-#         if loan["status"].upper() == "APPROVED":
-#             return jsonify({"message": "Loan already approved"}), 200
-
-#         # Update loan status
-#         db.execute("""
-#             UPDATE loans
-#             SET status = 'APPROVED',
-#                 approved_by = ?,
-#                 approved_at = ?,
-#                 updated_at = ?
-#             WHERE loanId = ?
-#         """, (
-#             admin_id,
-#             datetime.utcnow().isoformat(),
-#             datetime.utcnow().isoformat(),
-#             loan_id
-#         ))
-#         db.commit()
-
-#         # Update investor transaction if exists
-#         db.execute("""
-#             UPDATE transactions
-#             SET status = 'LOANED_OUT',
-#                 updated_at = ?,
-#                 metadata = COALESCE(metadata, ''),
-#                 failureMessage = 'Loan Approved',
-#                 failureCode = 'LOAN'
-#             WHERE user_id = ? AND type = 'investment'
-#         """, (datetime.utcnow().isoformat(), loan["user_id"]))
-#         db.commit()
-
-#         return jsonify({"message": f"Loan {loan_id} approved successfully"}), 200
-
-#     except Exception as e:
-#         db.rollback()
-#         return jsonify({"error": str(e)}), 500
 
 # -------------------------
 # DISAPPROVE LOAN
@@ -710,28 +442,27 @@ def get_transaction(deposit_id):
             pass
     return jsonify(res), 200
 
-
 # -------------------------
-# INVESTMENT ENDPOINTS
+# INVESTMENT ENDPOINTS (Using estack.db)
 # -------------------------
 @app.route("/api/investments/initiate", methods=["POST"])
 def initiate_investment():
     try:
         data = request.json or {}
-        # Support both "phone" and "phoneNumber" keys from different clients
         phone = data.get("phone") or data.get("phoneNumber")
         amount = data.get("amount")
         correspondent = data.get("correspondent", "MTN_MOMO_ZMB")
         currency = data.get("currency", "ZMW")
-        # prefer explicit user_id, but don't crash if missing
         user_id = data.get("user_id") or data.get("userId") or "unknown"
 
         if not phone or amount is None:
             return jsonify({"error": "Missing phone or amount"}), 400
 
+        # Generate a unique deposit ID for this investment
         deposit_id = str(uuid.uuid4())
         customer_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        # Prepare payload for PawaPay (still sending live or test request)
         payload = {
             "depositId": deposit_id,
             "amount": str(amount),
@@ -749,6 +480,7 @@ def initiate_investment():
         headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
 
+        # Try decoding the response
         try:
             result = resp.json()
         except Exception:
@@ -757,113 +489,156 @@ def initiate_investment():
 
         status = result.get("status", "PENDING")
 
-        db = get_db()
-        # Insert a new investment record (depositId will be unique)
-        db.execute("""
-            INSERT OR REPLACE INTO transactions
-            (depositId,status,amount,currency,phoneNumber,provider,
-             providerTransactionId,failureCode,failureMessage,metadata,received_at,type,user_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            deposit_id,
-            status,
-            float(amount),
-            currency,
-            phone,
-            None, None, None, None,
-            json.dumps(payload["metadata"]),
-            datetime.utcnow().isoformat(),
-            "investment",
-            user_id
-        ))
-        db.commit()
-        logger.info("initiate_investment: inserted depositId=%s user_id=%s amount=%s status=%s",
-                    deposit_id, user_id, amount, status)
+        # Create readable name for transaction
+        # e.g. "K500 | user_001 | DEP12345"
+        name_of_transaction = f"{currency}{amount} | {user_id} | {deposit_id}"
 
-        return jsonify({"depositId": deposit_id, "status": status}), 200
+        # Save to estack.db
+        db = get_db()
+        db.execute("""
+            INSERT INTO estack_transactions (name_of_transaction, status)
+            VALUES (?, ?)
+        """, (name_of_transaction, status))
+        db.commit()
+
+        logger.info("💰 Investment initiated: %s (user_id=%s, status=%s)",
+                    name_of_transaction, user_id, status)
+
+        return jsonify({
+            "message": "Investment initiated successfully",
+            "depositId": deposit_id,
+            "user_id": user_id,
+            "amount": amount,
+            "status": status
+        }), 200
 
     except Exception as e:
         logger.exception("Investment initiation error")
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/api/investments/user/<user_id>", methods=["GET"])
 def get_user_investments(user_id):
-    """
-    Return investments for a user. We select type='investment' and the exact user_id column.
-    This returns a list of rows (may be empty).
-    """
-    db = get_db()
-    rows = db.execute(
-        "SELECT * FROM transactions WHERE type='investment' AND user_id=? ORDER BY received_at DESC",
-        (user_id,)
-    ).fetchall()
+    try:
+        db = get_db()
+        rows = db.execute("""
+            SELECT name_of_transaction, status
+            FROM estack_transactions
+            WHERE name_of_transaction LIKE ?
+            ORDER BY rowid DESC
+        """, (f"%{user_id}%",)).fetchall()
 
-    results = []
-    for row in rows:
-        res = {k: row[k] for k in row.keys()}
-        if res.get("metadata"):
-            try:
-                res["metadata"] = json.loads(res["metadata"])
-            except:
-                pass
-        results.append(res)
+        results = [{"name_of_transaction": r["name_of_transaction"], "status": r["status"]} for r in rows]
+        return jsonify(results), 200
 
-    return jsonify(results), 200
+    except Exception as e:
+        logger.exception("Error fetching user investments")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/investments/status/<deposit_id>", methods=["GET"])
+def get_investment_status(deposit_id):
+    """Return the current status of an investment using its deposit_id."""
+    try:
+        conn = sqlite3.connect("estack.db")
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT name_of_transaction, status 
+            FROM estack_transactions 
+            WHERE name_of_transaction LIKE ?
+        """, (f"%{deposit_id}%",))
+        row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            return jsonify({"error": "Deposit not found"}), 404
+
+        return jsonify({
+            "deposit_id": deposit_id,
+            "name_of_transaction": row["name_of_transaction"],
+            "status": row["status"]
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# @app.route("/api/investments/user/<user_id>", methods=["GET"])
+# def get_user_investments(user_id):
+#     """
+#     Return investments for a user. We select type='investment' and the exact user_id column.
+#     This returns a list of rows (may be empty).
+#     """
+#     db = get_db()
+#     rows = db.execute(
+#         "SELECT * FROM transactions WHERE type='investment' AND user_id=? ORDER BY received_at DESC",
+#         (user_id,)
+#     ).fetchall()
+
+#     results = []
+#     for row in rows:
+#         res = {k: row[k] for k in row.keys()}
+#         if res.get("metadata"):
+#             try:
+#                 res["metadata"] = json.loads(res["metadata"])
+#             except:
+#                 pass
+#         results.append(res)
+
+#     return jsonify(results), 200
 
 
 # -------------------------
 # SAMPLE INVESTMENT ROUTE (handy for testing)
 # -------------------------
-@app.route("/sample-investment", methods=["POST"])
-def add_sample():
-    """Add a test investment to verify DB works"""
-    try:
-        db = get_db()
-        deposit_id = str(uuid.uuid4())
-        payload_metadata = [{"fieldName": "purpose", "fieldValue": "investment"},
-                            {"fieldName": "userId", "fieldValue": "user_1"}]
-        received_at = datetime.utcnow().isoformat()
-        db.execute("""
-            INSERT INTO transactions
-            (depositId,status,amount,currency,phoneNumber,metadata,received_at,type,user_id)
-            VALUES (?,?,?,?,?,?,?,?,?)
-        """, (
-            deposit_id,
-            "SUCCESS",
-            1000.0,
-            "ZMW",
-            "0965123456",
-            json.dumps(payload_metadata),
-            received_at,
-            "investment",
-            "user_1"
-        ))
-        db.commit()
-        logger.info("Added sample investment depositId=%s", deposit_id)
-        return jsonify({"message":"Sample investment added","depositId":deposit_id}), 200
-    except Exception as e:
-        logger.exception("Failed to insert sample")
-        return jsonify({"error": str(e)}), 500
+# @app.route("/sample-investment", methods=["POST"])
+# def add_sample():
+#     """Add a test investment to verify DB works"""
+#     try:
+#         db = get_db()
+#         deposit_id = str(uuid.uuid4())
+#         payload_metadata = [{"fieldName": "purpose", "fieldValue": "investment"},
+#                             {"fieldName": "userId", "fieldValue": "user_1"}]
+#         received_at = datetime.utcnow().isoformat()
+#         db.execute("""
+#             INSERT INTO transactions
+#             (depositId,status,amount,currency,phoneNumber,metadata,received_at,type,user_id)
+#             VALUES (?,?,?,?,?,?,?,?,?)
+#         """, (
+#             deposit_id,
+#             "SUCCESS",
+#             1000.0,
+#             "ZMW",
+#             "0965123456",
+#             json.dumps(payload_metadata),
+#             received_at,
+#             "investment",
+#             "user_1"
+#         ))
+#         db.commit()
+#         logger.info("Added sample investment depositId=%s", deposit_id)
+#         return jsonify({"message":"Sample investment added","depositId":deposit_id}), 200
+#     except Exception as e:
+#         logger.exception("Failed to insert sample")
+#         return jsonify({"error": str(e)}), 500
 
 
 # -------------------------
 # OPTIONAL: debug route to see all transactions (helpful during testing)
 # -------------------------
-@app.route("/debug/transactions", methods=["GET"])
-def debug_transactions():
-    db = get_db()
-    rows = db.execute("SELECT * FROM transactions ORDER BY received_at DESC").fetchall()
-    results = []
-    for row in rows:
-        res = {k: row[k] for k in row.keys()}
-        if res.get("metadata"):
-            try:
-                res["metadata"] = json.loads(res["metadata"])
-            except:
-                pass
-        results.append(res)
-    return jsonify(results), 200
+# @app.route("/debug/transactions", methods=["GET"])
+# def debug_transactions():
+#     db = get_db()
+#     rows = db.execute("SELECT * FROM transactions ORDER BY received_at DESC").fetchall()
+#     results = []
+#     for row in rows:
+#         res = {k: row[k] for k in row.keys()}
+#         if res.get("metadata"):
+#             try:
+#                 res["metadata"] = json.loads(res["metadata"])
+#             except:
+#                 pass
+#         results.append(res)
+#     return jsonify(results), 200
     
 #-----------------------------------
 # GET PENDING REQUESTS
@@ -1075,6 +850,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
