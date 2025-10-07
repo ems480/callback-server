@@ -571,31 +571,51 @@ def get_user_investments(user_id):
 
 @app.route("/api/investments/status/<deposit_id>", methods=["GET"])
 def get_investment_status(deposit_id):
-    """Return the current status of an investment using its deposit_id."""
     try:
-        conn = sqlite3.connect("estack.db")
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
+        db = sqlite3.connect("estack.db")
+        db.row_factory = sqlite3.Row
+        cur = db.cursor()
 
-        cur.execute("""
-            SELECT name_of_transaction, status 
-            FROM estack_transactions 
-            WHERE name_of_transaction LIKE ?
-        """, (f"%{deposit_id}%",))
+        cur.execute("SELECT status FROM transactions WHERE name LIKE ?", (f"%{deposit_id}%",))
         row = cur.fetchone()
-        conn.close()
+        db.close()
 
-        if not row:
-            return jsonify({"error": "Deposit not found"}), 404
-
-        return jsonify({
-            "deposit_id": deposit_id,
-            "name_of_transaction": row["name_of_transaction"],
-            "status": row["status"]
-        }), 200
+        if row:
+            return jsonify({"status": row["status"]}), 200
+        else:
+            return jsonify({"error": "Transaction not found"}), 404
 
     except Exception as e:
+        print("Error in get_investment_status:", e)
         return jsonify({"error": str(e)}), 500
+
+# @app.route("/api/investments/status/<deposit_id>", methods=["GET"])
+# def get_investment_status(deposit_id):
+#     """Return the current status of an investment using its deposit_id."""
+#     try:
+#         conn = sqlite3.connect("estack.db")
+#         conn.row_factory = sqlite3.Row
+#         cur = conn.cursor()
+
+#         cur.execute("""
+#             SELECT name_of_transaction, status 
+#             FROM estack_transactions 
+#             WHERE name_of_transaction LIKE ?
+#         """, (f"%{deposit_id}%",))
+#         row = cur.fetchone()
+#         conn.close()
+
+#         if not row:
+#             return jsonify({"error": "Deposit not found"}), 404
+
+#         return jsonify({
+#             "deposit_id": deposit_id,
+#             "name_of_transaction": row["name_of_transaction"],
+#             "status": row["status"]
+#         }), 200
+
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
 
 # @app.route("/api/investments/user/<user_id>", methods=["GET"])
 # def get_user_investments(user_id):
@@ -885,6 +905,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
