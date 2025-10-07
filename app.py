@@ -48,11 +48,9 @@ def init_db():
 
     # ✅ Create the single table
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS estack_transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name_of_transaction TEXT NOT NULL,  -- e.g. "K1000 | user_123 | DEP4567"
+        CREATE TABLE IF NOT EXISTS transactions (
+            name TEXT NOT NULL,  -- e.g. "K1000 | user_123 | DEP4567"
             status TEXT NOT NULL,               -- e.g. "invested", "loaned_out", "repaid"
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -285,51 +283,71 @@ def deposit_callback():
         data = request.get_json(force=True)
         print("Full callback data:", data)
 
-        # ✅ Extract deposit_id, amount, and user_id from the JSON
-        deposit_id = data.get("depositId")
-        amount = data.get("requestedAmount") or data.get("depositedAmount")
-        status = data.get("status", "PENDING")
-        metadata_obj = data.get("metadata", {})
-        user_id = metadata_obj.get("userId")
+        # Extract deposit_id
+        deposit_id = None
+        # Build deposit_id from custom name field if provided
+        name_field = data.get("name")
+        if name_field:
+            parts = [p.strip() for p in name_field.split("|")]
+            if len(parts) >= 3:
+                deposit_id = parts[2]
+
+        # Fallback to depositId or payoutId from payload
+        if not deposit_id:
+            deposit_id = data.get("depositId") or data.get("payoutId")
 
         if not deposit_id:
-            return jsonify({"error": "Missing depositId"}), 400
+            return jsonify({"error": "Missing depositId or payoutId"}), 400
 
-        # ✅ Build your custom name format
-        name_field = f"{amount} | {user_id or 'unknown'} | {deposit_id}"
-        print("Constructed name_field:", name_field)
+        # Extract other fields
+        status = data.get("status", "PENDING")
+        amount = data.get("amount") or data.get("depositedAmount") or 0
+        metadata_obj = data.get("metadata", {})
+        user_id = None
+        if isinstance(metadata_obj, dict):
+            user_id = metadata_obj.get("userId")
+        elif isinstance(metadata_obj, list):
+            for entry in metadata_obj:
+                if entry.get("fieldName") == "userId":
+                    user_id = entry.get("fieldValue")
 
-        # ✅ Connect to DB
+        # Build transaction name
+        name = f"{amount} | {user_id or 'unknown'} | {deposit_id}"
+        print("Constructed name:", name)
+
+        # Connect to your existing database
         db = sqlite3.connect("estack.db")
         db.row_factory = sqlite3.Row
         cur = db.cursor()
 
         # Ensure table exists
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS estack (
+            CREATE TABLE IF NOT EXISTS transactions (
                 name TEXT,
                 status TEXT
             )
         """)
 
-        # ✅ Check if deposit_id already exists
+        # Check if transaction already exists
         existing = cur.execute(
-            "SELECT name FROM estack WHERE name LIKE ?",
+            "SELECT name FROM transactions WHERE name LIKE ?",
             (f"%{deposit_id}%",)
         ).fetchone()
 
         if existing:
+            # Update status
             cur.execute(
-                "UPDATE estack SET status=? WHERE name LIKE ?",
+                "UPDATE transactions SET status=? WHERE name LIKE ?",
                 (status, f"%{deposit_id}%")
             )
-            print(f"Updated status for {deposit_id} → {status}")
+            print(f"Updated existing transaction {deposit_id} → {status}")
         else:
+            # Insert new transaction
             cur.execute(
-                "INSERT INTO estack (name, status) VALUES (?, ?)",
-                (name_field, status)
+                "INSERT INTO transactions (name, status) VALUES (?, ?)",
+                (name, status)
             )
-            print(f"Inserted new transaction: {name_field}")
+            print(f"Inserted new transaction: {name}")
 
         db.commit()
         db.close()
@@ -865,6 +883,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
