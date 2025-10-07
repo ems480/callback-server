@@ -293,35 +293,28 @@ app = Flask(__name__)
 def deposit_callback():
     try:
         data = request.get_json(force=True)
-        print("Full callback data:", data)
+        print("📩 Full callback data:", data)
 
-        # Extract deposit_id
-        deposit_id = data.get("depositId") or data.get("payoutId")
-        if not deposit_id:
-            return jsonify({"error": "Missing depositId or payoutId"}), 400
-
-        # Extract amount
-        amount = data.get("requestedAmount") or data.get("depositedAmount") or 0
-
-        # Extract status
-        status = data.get("status", "PENDING")
-
-        # Extract user_id from metadata
-        user_id = None
+        deposit_id = data.get("depositId")
+        status = data.get("status", "PENDING").upper()
+        amount = data.get("requestedAmount") or data.get("depositedAmount") or "0"
         metadata = data.get("metadata", {})
-        if isinstance(metadata, dict):
-            user_id = metadata.get("userId")
+        user_id = metadata.get("userId", "unknown")
 
-        # Build transaction name
-        name = f"{amount} | {user_id or 'unknown'} | {deposit_id}"
-        print("Constructed transaction name:", name)
+        if not deposit_id:
+            return jsonify({"error": "Missing depositId"}), 400
+
+        # Build transaction name format
+        name = f"{amount.strip()} | {user_id.strip()} | {deposit_id.strip()}"
+        print(f"➡️ Constructed transaction name: {name}")
+        print(f"➡️ Updating status to: {status}")
 
         # Connect to existing database
         db = sqlite3.connect("estack.db")
         db.row_factory = sqlite3.Row
         cur = db.cursor()
 
-        # Ensure table exists
+        # Make sure table exists
         cur.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 name TEXT,
@@ -329,26 +322,26 @@ def deposit_callback():
             )
         """)
 
-        # Check if transaction already exists
+        # Check if the record already exists
         existing = cur.execute(
             "SELECT name FROM transactions WHERE name LIKE ?",
             (f"%{deposit_id}%",)
         ).fetchone()
 
         if existing:
-            # Update the status of existing transaction
+            # Update existing record
             cur.execute(
-                "UPDATE transactions SET status=? WHERE name LIKE ?",
+                "UPDATE transactions SET status = ? WHERE name LIKE ?",
                 (status, f"%{deposit_id}%")
             )
-            print(f"Updated existing transaction {deposit_id} → {status}")
+            print(f"🔄 Updated existing record {deposit_id} → {status}")
         else:
-            # Insert new transaction
+            # Insert new record
             cur.execute(
                 "INSERT INTO transactions (name, status) VALUES (?, ?)",
                 (name, status)
             )
-            print(f"Inserted new transaction: {name}")
+            print(f"💾 Inserted new record: {name} ({status})")
 
         db.commit()
         db.close()
@@ -360,90 +353,9 @@ def deposit_callback():
         }), 200
 
     except Exception as e:
-        print("Error in /callback/deposit:", e)
+        print("❌ Error in /callback/deposit:", e)
         return jsonify({"error": str(e)}), 500
 
-
-# @app.route("/callback/deposit", methods=["POST"])
-# def deposit_callback():
-#     try:
-#         data = request.get_json(force=True)
-
-#         # Extract deposit or payout ID
-#         deposit_id = data.get("depositId")
-#         payout_id = data.get("payoutId")
-
-#         if not deposit_id and not payout_id:
-#             return jsonify({"error": "Missing depositId or payoutId"}), 400
-
-#         txn_id = deposit_id or payout_id
-#         status = data.get("status", "PENDING")
-#         amount = data.get("amount", 0)
-#         metadata_obj = data.get("metadata")
-
-#         # Extract user_id from metadata
-#         user_id = None
-#         if metadata_obj:
-#             if isinstance(metadata_obj, dict):
-#                 user_id = metadata_obj.get("userId")
-#             elif isinstance(metadata_obj, list):
-#                 for entry in metadata_obj:
-#                     if entry.get("fieldName") == "userId":
-#                         user_id = entry.get("fieldValue")
-
-#         # Connect to existing estack.db
-#         db = sqlite3.connect("estack.db")
-#         db.row_factory = sqlite3.Row
-#         cur = db.cursor()
-
-#         # Ensure the correct table exists (only necessary fields)
-#         cur.execute("""
-#             CREATE TABLE IF NOT EXISTS transactions (
-#                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-#                 name TEXT NOT NULL,
-#                 amount REAL,
-#                 user_id TEXT,
-#                 deposit_id TEXT UNIQUE,
-#                 status TEXT
-#             )
-#         """)
-
-#         # Build descriptive transaction name
-#         name = f"{amount} | {user_id or 'unknown'} | {txn_id}"
-
-#         # Check if transaction already exists
-#         existing = cur.execute(
-#             "SELECT * FROM transactions WHERE deposit_id = ?",
-#             (txn_id,)
-#         ).fetchone()
-
-#         if existing:
-#             # Just update the status if already exists
-#             cur.execute("""
-#                 UPDATE transactions
-#                 SET status = ?
-#                 WHERE deposit_id = ?
-#             """, (status, txn_id))
-#         else:
-#             # Insert new transaction record
-#             cur.execute("""
-#                 INSERT INTO transactions (name, amount, user_id, deposit_id, status)
-#                 VALUES (?, ?, ?, ?, ?)
-#             """, (name, float(amount), user_id, txn_id, status))
-
-#         db.commit()
-#         db.close()
-
-#         return jsonify({
-#             "success": True,
-#             "message": "Transaction saved successfully",
-#             "deposit_id": txn_id,
-#             "status": status
-#         }), 200
-
-#     except Exception as e:
-#         print("Error in /callback/deposit:", e)
-#         return jsonify({"error": str(e)}), 500
 
 # -------------------------
 # DEPOSIT STATUS / TRANSACTION LOOKUP
@@ -905,6 +817,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
