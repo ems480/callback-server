@@ -284,6 +284,11 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
+import sqlite3
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
 @app.route("/callback/deposit", methods=["POST"])
 def deposit_callback():
     try:
@@ -291,38 +296,27 @@ def deposit_callback():
         print("Full callback data:", data)
 
         # Extract deposit_id
-        deposit_id = None
-        # Build deposit_id from custom name field if provided
-        name_field = data.get("name")
-        if name_field:
-            parts = [p.strip() for p in name_field.split("|")]
-            if len(parts) >= 3:
-                deposit_id = parts[2]
-
-        # Fallback to depositId or payoutId from payload
-        if not deposit_id:
-            deposit_id = data.get("depositId") or data.get("payoutId")
-
+        deposit_id = data.get("depositId") or data.get("payoutId")
         if not deposit_id:
             return jsonify({"error": "Missing depositId or payoutId"}), 400
 
-        # Extract other fields
+        # Extract amount
+        amount = data.get("requestedAmount") or data.get("depositedAmount") or 0
+
+        # Extract status
         status = data.get("status", "PENDING")
-        amount = data.get("amount") or data.get("depositedAmount") or 0
-        metadata_obj = data.get("metadata", {})
+
+        # Extract user_id from metadata
         user_id = None
-        if isinstance(metadata_obj, dict):
-            user_id = metadata_obj.get("userId")
-        elif isinstance(metadata_obj, list):
-            for entry in metadata_obj:
-                if entry.get("fieldName") == "userId":
-                    user_id = entry.get("fieldValue")
+        metadata = data.get("metadata", {})
+        if isinstance(metadata, dict):
+            user_id = metadata.get("userId")
 
         # Build transaction name
         name = f"{amount} | {user_id or 'unknown'} | {deposit_id}"
-        print("Constructed name:", name)
+        print("Constructed transaction name:", name)
 
-        # Connect to your existing database
+        # Connect to existing database
         db = sqlite3.connect("estack.db")
         db.row_factory = sqlite3.Row
         cur = db.cursor()
@@ -342,7 +336,7 @@ def deposit_callback():
         ).fetchone()
 
         if existing:
-            # Update status
+            # Update the status of existing transaction
             cur.execute(
                 "UPDATE transactions SET status=? WHERE name LIKE ?",
                 (status, f"%{deposit_id}%")
@@ -368,6 +362,7 @@ def deposit_callback():
     except Exception as e:
         print("Error in /callback/deposit:", e)
         return jsonify({"error": str(e)}), 500
+
 
 # @app.route("/callback/deposit", methods=["POST"])
 # def deposit_callback():
@@ -890,6 +885,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
