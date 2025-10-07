@@ -284,7 +284,7 @@ def deposit_callback():
     try:
         data = request.get_json(force=True)
 
-        name_field = data.get("name_of_transaction")
+        name_field = data.get("name")
         print("Name field:", name_field)
 
         # ✅ Always define deposit_id before use
@@ -880,6 +880,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
