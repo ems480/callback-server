@@ -286,6 +286,8 @@ def deposit_callback():
 
         name_field = data.get("name")
         print("Name field:", name_field)
+        print("Full callback data:", data)
+
 
         # ✅ Always define deposit_id before use
         deposit_id = None
@@ -880,6 +882,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
