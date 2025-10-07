@@ -495,14 +495,29 @@ def get_user_loans(user_id):
     try:
         db = get_db()
         rows = db.execute("""
-            SELECT loan_id, amount, status, borrower_id, investor_id
-            FROM loans
-            WHERE borrower_id = ?
-            ORDER BY created_at DESC
-        """, (user_id,)).fetchall()
+            SELECT name, status
+            FROM transactions
+            WHERE name LIKE ?
+            ORDER BY rowid DESC
+        """, (f"%{user_id}%",)).fetchall()
 
-        loans = [dict(row) for row in rows]
-        return jsonify(loans), 200
+        results = []
+        for r in rows:
+            name = r["name"]
+            status = r["status"]
+
+            # Try to split the stored name like: "ZMW500 | user_1 | some-loan-id"
+            parts = [p.strip() for p in name.split("|")]
+            amount, borrower_id, loan_id = parts if len(parts) == 3 else ("N/A", user_id, "N/A")
+
+            results.append({
+                "loan_id": loan_id,
+                "amount": amount,
+                "status": status,
+                "borrower_id": borrower_id
+            })
+
+        return jsonify(results), 200
 
     except Exception as e:
         logger.exception("Error fetching user loans")
@@ -717,3 +732,4 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
