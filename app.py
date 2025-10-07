@@ -299,8 +299,8 @@ def deposit_callback():
 
         # or data.get("payoutId")
         
-        if not deposit_id:
-            return jsonify({"error": "Missing depositId or payoutId"}), 400
+        # if not deposit_id:
+        #     return jsonify({"error": "Missing depositId or payoutId"}), 400
 
         status = data.get("status", "PENDING")
         amount = data.get("amount", 0)
@@ -879,6 +879,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
