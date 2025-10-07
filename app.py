@@ -118,7 +118,6 @@ def pending_loans():
     results = [dict(row) for row in rows]
     return jsonify(results), 200
 
-
 # -------------------------
 # APPROVE LOAN
 # # -------------------------
@@ -202,14 +201,12 @@ def close_connection(exception):
     if db is not None:
         db.close()
 
-
 # -------------------------
 # HEALTH
 # -------------------------
 @app.route("/")
 def home():
     return f"PawaPay Callback Receiver running ✅ (API_MODE={API_MODE})"
-
 
 # -------------------------
 # ORIGINAL PAYMENT ENDPOINTS
@@ -490,137 +487,30 @@ def get_investment_status(deposit_id):
     except Exception as e:
         print("Error in get_investment_status:", e)
         return jsonify({"error": str(e)}), 500
+# +++++++++++++++++++++++++++++++++++++++
+# Rerieving loans requests
+# +++++++++++++++++++++++++++++++++++++++
+@app.route("/api/loans/user/<user_id>", methods=["GET"])
+def get_user_loans(user_id):
+    try:
+        db = get_db()
+        rows = db.execute("""
+            SELECT loan_id, amount, status, borrower_id, investor_id
+            FROM loans
+            WHERE borrower_id = ?
+            ORDER BY created_at DESC
+        """, (user_id,)).fetchall()
 
-# @app.route("/api/investments/status/<deposit_id>", methods=["GET"])
-# def get_investment_status(deposit_id):
-#     try:
-#         db = sqlite3.connect("estack.db")
-#         db.row_factory = sqlite3.Row
-#         cur = db.cursor()
+        loans = [dict(row) for row in rows]
+        return jsonify(loans), 200
 
-#         cur.execute("SELECT status FROM transactions WHERE name LIKE ?", (f"%{deposit_id}%",))
-#         row = cur.fetchone()
-#         db.close()
+    except Exception as e:
+        logger.exception("Error fetching user loans")
+        return jsonify({"error": str(e)}), 500
 
-#         if row:
-#             return jsonify({"status": row["status"]}), 200
-#         else:
-#             return jsonify({"error": "Transaction not found"}), 404
-
-#     except Exception as e:
-#         print("Error in get_investment_status:", e)
-#         return jsonify({"error": str(e)}), 500
-
-# @app.route("/api/investments/status/<deposit_id>", methods=["GET"])
-# def get_investment_status(deposit_id):
-#     """Return the current status of an investment using its deposit_id."""
-#     try:
-#         conn = sqlite3.connect("estack.db")
-#         conn.row_factory = sqlite3.Row
-#         cur = conn.cursor()
-
-#         cur.execute("""
-#             SELECT name_of_transaction, status 
-#             FROM estack_transactions 
-#             WHERE name_of_transaction LIKE ?
-#         """, (f"%{deposit_id}%",))
-#         row = cur.fetchone()
-#         conn.close()
-
-#         if not row:
-#             return jsonify({"error": "Deposit not found"}), 404
-
-#         return jsonify({
-#             "deposit_id": deposit_id,
-#             "name_of_transaction": row["name_of_transaction"],
-#             "status": row["status"]
-#         }), 200
-
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
-
-# @app.route("/api/investments/user/<user_id>", methods=["GET"])
-# def get_user_investments(user_id):
-#     """
-#     Return investments for a user. We select type='investment' and the exact user_id column.
-#     This returns a list of rows (may be empty).
-#     """
-#     db = get_db()
-#     rows = db.execute(
-#         "SELECT * FROM transactions WHERE type='investment' AND user_id=? ORDER BY received_at DESC",
-#         (user_id,)
-#     ).fetchall()
-
-#     results = []
-#     for row in rows:
-#         res = {k: row[k] for k in row.keys()}
-#         if res.get("metadata"):
-#             try:
-#                 res["metadata"] = json.loads(res["metadata"])
-#             except:
-#                 pass
-#         results.append(res)
-
-#     return jsonify(results), 200
-
-
-# -------------------------
-# SAMPLE INVESTMENT ROUTE (handy for testing)
-# -------------------------
-# @app.route("/sample-investment", methods=["POST"])
-# def add_sample():
-#     """Add a test investment to verify DB works"""
-#     try:
-#         db = get_db()
-#         deposit_id = str(uuid.uuid4())
-#         payload_metadata = [{"fieldName": "purpose", "fieldValue": "investment"},
-#                             {"fieldName": "userId", "fieldValue": "user_1"}]
-#         received_at = datetime.utcnow().isoformat()
-#         db.execute("""
-#             INSERT INTO transactions
-#             (depositId,status,amount,currency,phoneNumber,metadata,received_at,type,user_id)
-#             VALUES (?,?,?,?,?,?,?,?,?)
-#         """, (
-#             deposit_id,
-#             "SUCCESS",
-#             1000.0,
-#             "ZMW",
-#             "0965123456",
-#             json.dumps(payload_metadata),
-#             received_at,
-#             "investment",
-#             "user_1"
-#         ))
-#         db.commit()
-#         logger.info("Added sample investment depositId=%s", deposit_id)
-#         return jsonify({"message":"Sample investment added","depositId":deposit_id}), 200
-#     except Exception as e:
-#         logger.exception("Failed to insert sample")
-#         return jsonify({"error": str(e)}), 500
-
-
-# -------------------------
-# OPTIONAL: debug route to see all transactions (helpful during testing)
-# -------------------------
-# @app.route("/debug/transactions", methods=["GET"])
-# def debug_transactions():
-#     db = get_db()
-#     rows = db.execute("SELECT * FROM transactions ORDER BY received_at DESC").fetchall()
-#     results = []
-#     for row in rows:
-#         res = {k: row[k] for k in row.keys()}
-#         if res.get("metadata"):
-#             try:
-#                 res["metadata"] = json.loads(res["metadata"])
-#             except:
-#                 pass
-#         results.append(res)
-#     return jsonify(results), 200
-    
 #-----------------------------------
 # GET PENDING REQUESTS
 #----------------------------------
-
 @app.route("/api/loans/pending", methods=["GET"])
 def get_pending_loans():
     conn = sqlite3.connect(DATABASE)
@@ -827,27 +717,3 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
