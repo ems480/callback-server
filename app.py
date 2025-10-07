@@ -283,48 +283,28 @@ def initiate_payment():
 def deposit_callback():
     try:
         data = request.get_json(force=True)
-
-        name_field = data.get("name")
-        print("Name field:", name_field)
         print("Full callback data:", data)
 
-
-        # ✅ Always define deposit_id before use
-        deposit_id = None
-
-        if name_field:
-            parts = [p.strip() for p in name_field.split("|")]
-            if len(parts) >= 3:
-                deposit_id = parts[2]
-
-        # ✅ Optional fallback
-        if not deposit_id:
-            deposit_id = data.get("depositId") or data.get("payoutId")
-
-        # ✅ Check that we actually have one
-        if not deposit_id:
-            return jsonify({"error": "Missing depositId or payoutId"}), 400
-
+        # ✅ Extract deposit_id, amount, and user_id from the JSON
+        deposit_id = data.get("depositId")
+        amount = data.get("requestedAmount") or data.get("depositedAmount")
         status = data.get("status", "PENDING")
-        amount = data.get("amount", 0)
-        metadata_obj = data.get("metadata")
+        metadata_obj = data.get("metadata", {})
+        user_id = metadata_obj.get("userId")
 
-        # Extract user_id from metadata
-        user_id = None
-        if metadata_obj:
-            if isinstance(metadata_obj, dict):
-                user_id = metadata_obj.get("userId")
-            elif isinstance(metadata_obj, list):
-                for entry in metadata_obj:
-                    if entry.get("fieldName") == "userId":
-                        user_id = entry.get("fieldValue")
+        if not deposit_id:
+            return jsonify({"error": "Missing depositId"}), 400
 
-        # Connect to existing database
+        # ✅ Build your custom name format
+        name_field = f"{amount} | {user_id or 'unknown'} | {deposit_id}"
+        print("Constructed name_field:", name_field)
+
+        # ✅ Connect to DB
         db = sqlite3.connect("estack.db")
         db.row_factory = sqlite3.Row
         cur = db.cursor()
 
-        # Make sure table exists
+        # Ensure table exists
         cur.execute("""
             CREATE TABLE IF NOT EXISTS estack (
                 name TEXT,
@@ -332,21 +312,24 @@ def deposit_callback():
             )
         """)
 
-        # Build transaction name format
-        name = f"{amount} | {user_id or 'unknown'} | {deposit_id}"
-
-        # Try to find existing record by deposit_id inside 'name'
+        # ✅ Check if deposit_id already exists
         existing = cur.execute(
             "SELECT name FROM estack WHERE name LIKE ?",
             (f"%{deposit_id}%",)
         ).fetchone()
 
         if existing:
-            # Update only the status
-            cur.execute("UPDATE estack SET status=? WHERE name LIKE ?", (status, f"%{deposit_id}%"))
+            cur.execute(
+                "UPDATE estack SET status=? WHERE name LIKE ?",
+                (status, f"%{deposit_id}%")
+            )
+            print(f"Updated status for {deposit_id} → {status}")
         else:
-            # Insert new transaction
-            cur.execute("INSERT INTO estack (name, status) VALUES (?, ?)", (name, status))
+            cur.execute(
+                "INSERT INTO estack (name, status) VALUES (?, ?)",
+                (name_field, status)
+            )
+            print(f"Inserted new transaction: {name_field}")
 
         db.commit()
         db.close()
@@ -882,6 +865,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
