@@ -296,66 +296,55 @@ def deposit_callback():
         print("📩 Full callback data:", data)
 
         deposit_id = data.get("depositId")
-        status = data.get("status", "PENDING").upper()
-        amount = data.get("requestedAmount") or data.get("depositedAmount") or "0"
+        status = data.get("status", "PENDING").strip().upper()
+        amount = data.get("depositedAmount", 0)
         metadata = data.get("metadata", {})
         user_id = metadata.get("userId", "unknown")
 
         if not deposit_id:
             return jsonify({"error": "Missing depositId"}), 400
 
-        # Build transaction name format
-        name = f"{amount.strip()} | {user_id.strip()} | {deposit_id.strip()}"
-        print(f"➡️ Constructed transaction name: {name}")
-        print(f"➡️ Updating status to: {status}")
+        # ✅ Build transaction name format
+        name = f"{amount} | {user_id} | {deposit_id}"
 
-        # Connect to existing database
-        db = sqlite3.connect("estack.db")
-        db.row_factory = sqlite3.Row
-        cur = db.cursor()
+        conn = sqlite3.connect("estack.db")
+        cur = conn.cursor()
 
-        # Make sure table exists
+        # ✅ Ensure correct table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
-                name TEXT,
-                status TEXT
+                name TEXT NOT NULL,
+                status TEXT NOT NULL
             )
         """)
 
-        # Check if the record already exists
+        # ✅ Check if record exists (by deposit_id)
         existing = cur.execute(
             "SELECT name FROM transactions WHERE name LIKE ?",
             (f"%{deposit_id}%",)
         ).fetchone()
 
         if existing:
-            # Update existing record
             cur.execute(
                 "UPDATE transactions SET status = ? WHERE name LIKE ?",
                 (status, f"%{deposit_id}%")
             )
-            print(f"🔄 Updated existing record {deposit_id} → {status}")
+            print(f"🔄 Updated existing transaction {deposit_id} → {status}")
         else:
-            # Insert new record
             cur.execute(
                 "INSERT INTO transactions (name, status) VALUES (?, ?)",
                 (name, status)
             )
-            print(f"💾 Inserted new record: {name} ({status})")
+            print(f"💾 Inserted new transaction {deposit_id} → {status}")
 
-        db.commit()
-        db.close()
+        conn.commit()
+        conn.close()
 
-        return jsonify({
-            "success": True,
-            "deposit_id": deposit_id,
-            "status": status
-        }), 200
+        return jsonify({"success": True, "deposit_id": deposit_id, "status": status}), 200
 
     except Exception as e:
         print("❌ Error in /callback/deposit:", e)
         return jsonify({"error": str(e)}), 500
-
 
 # -------------------------
 # DEPOSIT STATUS / TRANSACTION LOOKUP
@@ -817,6 +806,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
