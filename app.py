@@ -293,7 +293,7 @@ def deposit_callback():
         # Extract deposit_id
         deposit_id = None
         # Build deposit_id from custom name field if provided
-        name_field = data.get("name_of_transaction")
+        name_field = data.get("name")
         if name_field:
             parts = [p.strip() for p in name_field.split("|")]
             if len(parts) >= 3:
@@ -890,6 +890,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
