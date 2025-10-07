@@ -304,41 +304,41 @@ def deposit_callback():
         if not deposit_id:
             return jsonify({"error": "Missing depositId"}), 400
 
-        # ✅ Build transaction name format
-        name = f"{amount} | {user_id} | {deposit_id}"
+        name_of_transaction = f"ZMW{amount} | {user_id} | {deposit_id}"
 
-        conn = sqlite3.connect("estack.db")
-        cur = conn.cursor()
+        db = sqlite3.connect("estack.db")
+        db.row_factory = sqlite3.Row
+        cur = db.cursor()
 
-        # ✅ Ensure correct table
+        # ✅ Use the correct table (same one as in /initiate)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS transactions (
-                name TEXT NOT NULL,
+            CREATE TABLE IF NOT EXISTS estack_transactions (
+                name_of_transaction TEXT NOT NULL,
                 status TEXT NOT NULL
             )
         """)
 
-        # ✅ Check if record exists (by deposit_id)
+        # ✅ Check if transaction already exists
         existing = cur.execute(
-            "SELECT name FROM transactions WHERE name LIKE ?",
+            "SELECT name_of_transaction FROM estack_transactions WHERE name_of_transaction LIKE ?",
             (f"%{deposit_id}%",)
         ).fetchone()
 
         if existing:
             cur.execute(
-                "UPDATE transactions SET status = ? WHERE name LIKE ?",
+                "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ?",
                 (status, f"%{deposit_id}%")
             )
-            print(f"🔄 Updated existing transaction {deposit_id} → {status}")
+            print(f"🔄 Updated transaction {deposit_id} → {status}")
         else:
             cur.execute(
-                "INSERT INTO transactions (name, status) VALUES (?, ?)",
-                (name, status)
+                "INSERT INTO estack_transactions (name_of_transaction, status) VALUES (?, ?)",
+                (name_of_transaction, status)
             )
             print(f"💾 Inserted new transaction {deposit_id} → {status}")
 
-        conn.commit()
-        conn.close()
+        db.commit()
+        db.close()
 
         return jsonify({"success": True, "deposit_id": deposit_id, "status": status}), 200
 
@@ -477,7 +477,8 @@ def get_investment_status(deposit_id):
         db.row_factory = sqlite3.Row
         cur = db.cursor()
 
-        cur.execute("SELECT status FROM transactions WHERE name LIKE ?", (f"%{deposit_id}%",))
+        # ✅ Match the same table name
+        cur.execute("SELECT status FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{deposit_id}%",))
         row = cur.fetchone()
         db.close()
 
@@ -489,6 +490,26 @@ def get_investment_status(deposit_id):
     except Exception as e:
         print("Error in get_investment_status:", e)
         return jsonify({"error": str(e)}), 500
+
+# @app.route("/api/investments/status/<deposit_id>", methods=["GET"])
+# def get_investment_status(deposit_id):
+#     try:
+#         db = sqlite3.connect("estack.db")
+#         db.row_factory = sqlite3.Row
+#         cur = db.cursor()
+
+#         cur.execute("SELECT status FROM transactions WHERE name LIKE ?", (f"%{deposit_id}%",))
+#         row = cur.fetchone()
+#         db.close()
+
+#         if row:
+#             return jsonify({"status": row["status"]}), 200
+#         else:
+#             return jsonify({"error": "Transaction not found"}), 404
+
+#     except Exception as e:
+#         print("Error in get_investment_status:", e)
+#         return jsonify({"error": str(e)}), 500
 
 # @app.route("/api/investments/status/<deposit_id>", methods=["GET"])
 # def get_investment_status(deposit_id):
@@ -806,6 +827,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
