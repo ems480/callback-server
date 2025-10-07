@@ -287,7 +287,10 @@ def deposit_callback():
     try:
         data = request.get_json(force=True)
 
-        deposit_id = data.get("depositId") or data.get("payoutId")
+        deposit_id_0 = data.get("name")
+        deposit_id = deposit_id_0.split("|")[2].strip()
+        print(deposit_id)
+        # or data.get("payoutId")
         
         if not deposit_id:
             return jsonify({"error": "Missing depositId or payoutId"}), 400
@@ -869,6 +872,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
