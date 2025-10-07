@@ -279,28 +279,29 @@ def initiate_payment():
 # -------------------------
 
 #Test 2 callback 2
-# import sqlite3
-# from flask import request, jsonify
-
 @app.route("/callback/deposit", methods=["POST"])
 def deposit_callback():
     try:
         data = request.get_json(force=True)
 
         name_field = data.get("name_of_transaction")
-        print(str(name_field))
-        # deposit_id = deposit_id_0.split("|")[2].strip()
-        # print(deposit_id)
+        print("Name field:", name_field)
+
+        # ✅ Always define deposit_id before use
+        deposit_id = None
 
         if name_field:
             parts = [p.strip() for p in name_field.split("|")]
             if len(parts) >= 3:
                 deposit_id = parts[2]
 
-        # or data.get("payoutId")
-        
-        # if not deposit_id:
-        #     return jsonify({"error": "Missing depositId or payoutId"}), 400
+        # ✅ Optional fallback
+        if not deposit_id:
+            deposit_id = data.get("depositId") or data.get("payoutId")
+
+        # ✅ Check that we actually have one
+        if not deposit_id:
+            return jsonify({"error": "Missing depositId or payoutId"}), 400
 
         status = data.get("status", "PENDING")
         amount = data.get("amount", 0)
@@ -879,6 +880,7 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
