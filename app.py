@@ -79,7 +79,7 @@ def get_db():
     
 # -------------------------
 # REQUEST A LOAN
-@app.route("/api/loans/request", methods=["POST"])
+@app.route("/api/transactions/request", methods=["POST"])
 def request_loan():
     try:
         data = request.json or {}
@@ -743,5 +743,6 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
