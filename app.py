@@ -5,34 +5,48 @@ from flask import Flask, request, jsonify, g
 import os, logging, sqlite3, json, requests, uuid
 from datetime import datetime
 
-import dropbox
 import os
+import dropbox
+from database_backup import download_db, upload_db
+
+# On startup — pull latest DB
+download_db()
 
 DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_TOKEN")
-DBX_PATH = "/estack.db"  # path inside Dropbox app folder
-LOCAL_DB = "estack.db"   # your SQLite file
+DBX_PATH = "/estack.db"
+LOCAL_DB = "estack.db"
+
+
+def get_dbx():
+    """Safely create Dropbox client"""
+    if not DROPBOX_ACCESS_TOKEN:
+        raise ValueError("❌ Missing DROPBOX_TOKEN environment variable.")
+    return dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
 
 def upload_db():
     """Upload local estack.db to Dropbox"""
     try:
-        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+        dbx = get_dbx()
         with open(LOCAL_DB, "rb") as f:
             dbx.files_upload(f.read(), DBX_PATH, mode=dropbox.files.WriteMode("overwrite"))
         print("✅ estack.db uploaded to Dropbox.")
+    except FileNotFoundError:
+        print("⚠️ Local estack.db not found for upload.")
     except Exception as e:
-        print("Dropbox upload failed:", e)
+        print("❌ Dropbox upload failed:", e)
 
 def download_db():
     """Download estack.db from Dropbox (run on app startup)"""
     try:
-        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+        dbx = get_dbx()
+        metadata, res = dbx.files_download(DBX_PATH)
         with open(LOCAL_DB, "wb") as f:
-            metadata, res = dbx.files_download(DBX_PATH)
             f.write(res.content)
         print("✅ estack.db downloaded from Dropbox.")
-    except dropbox.exceptions.ApiError as e:
-        print("⚠️ No existing estack.db found in Dropbox (starting fresh)")
-
+    except dropbox.exceptions.ApiError:
+        print("⚠️ No existing estack.db found in Dropbox (starting fresh).")
+    except Exception as e:
+        print("❌ Dropbox download failed:", e)
 
 # -------------------------
 # API CONFIGURATION
@@ -1851,6 +1865,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
