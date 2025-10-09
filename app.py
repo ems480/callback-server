@@ -79,34 +79,45 @@ def get_db():
     
 # -------------------------
 # REQUEST A LOAN
-# # -------------------------
-
 @app.route("/api/loans/request", methods=["POST"])
 def request_loan():
-    data = request.json
-    user_id = data.get("user_id")
-    investment_id = data.get("investment_id")
-    amount = data.get("amount")
-    interest = data.get("interest", 5)
-    expected_return_date = data.get("expected_return_date")
-    phone = data.get("phone")  # <- NEW
+    try:
+        data = request.json or {}
+        borrower_id = data.get("borrower_id")
+        phone = data.get("phone")
+        amount = data.get("amount")
+        investment_id = data.get("investment_id")
+        interest = data.get("interest", 5)
+        expected_return_date = data.get("expected_return_date", "")
 
-    if not user_id or not amount or not expected_return_date or not investment_id or not phone:
-        return jsonify({"error": "Missing required fields"}), 400
+        if not borrower_id or not amount:
+            return jsonify({"error": "Missing borrower_id or amount"}), 400
 
-    loanId = str(uuid.uuid4())
-    created_at = datetime.utcnow().isoformat()
+        # Combine into readable name for same table format
+        # Example: "ZMW500 | user_1 | loan_abc123"
+        loan_id = str(uuid.uuid4())
+        name = f"ZMW{amount} | {borrower_id} | {loan_id}"
+        status = "REQUESTED"
 
-    conn = sqlite3.connect(DATABASE)
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO loans (loanId, user_id, investment_id, amount, interest, status, expected_return_date, created_at, phone)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (loanId, user_id, investment_id, amount, interest, "PENDING", expected_return_date, created_at, phone))
-    conn.commit()
-    conn.close()
+        db = get_db()
+        db.execute(
+            "INSERT INTO transactions (name, status) VALUES (?, ?)",
+            (name, status)
+        )
+        db.commit()
 
-    return jsonify({"loanId": loanId, "status": "PENDING"}), 200
+        print(f"💸 Loan request recorded for {borrower_id}: {amount} ({loan_id})")
+
+        return jsonify({
+            "message": "Loan requested successfully",
+            "loan_id": loan_id,
+            "amount": amount,
+            "status": status
+        }), 200
+
+    except Exception as e:
+        logger.exception("Error requesting loan")
+        return jsonify({"error": str(e)}), 500
 
 # -------------------------
 # LIST PENDING LOANS (ADMIN VIEW)
@@ -732,4 +743,5 @@ if __name__ == "__main__":
         init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
