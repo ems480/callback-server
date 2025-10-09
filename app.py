@@ -5,6 +5,35 @@ from flask import Flask, request, jsonify, g
 import os, logging, sqlite3, json, requests, uuid
 from datetime import datetime
 
+import dropbox
+import os
+
+DROPBOX_ACCESS_TOKEN = "sl.u.AGC56Ym667-qWLFa_9jUmElYA1GHzIe0pzRNB9qsKIIVg0KFXn9fupNc--mHt_Xd_VOMaKq21UsHuGhXLtg9tFABHgCsjw9FzIG8n0J_BFgpEMQEjaJh0R__ImHD0bkV3ryZzkHOugIAViHLVI5aZ3Cyktr8zKX3PCtphG8C_DV0lxqOqQGvZyNj9ESom0o7i5xsy6KhIIvrFBNnsZbRsOvd4IzLYUYAjuKtwU7gdvS6j_VQFl-zes_Z_9nsemQrDV4VfQwcisq1FcnUrrUvCEzus6HSzjFSVyVvJLeo3hOGyI2B1YHbT6dB-zIo_LLBILREa65mbNT5JoocSxEBc_aDz3hrYkpj98HQFYwaZPqoIPzmAwWuO7nyWg7_6GKwbIrb0wsmgbhMI2RBz6BGaDmlwI6_wXx6zHx5wmVSjXdI_jwlDRu1mYMn5u-CdTIcxyw2t65AQveQf38JOIrMnUcSStC--IKkGD26MLcMlFmsdpBfk6c9eX3Xdr6YourtCBobPviTNX2zek1kCk65_ozM7C6Db0bTvl-_h1C-sCua45qH7ejW6QdD767WoYvecXb5Hh0SsLKJ-upBdYUdM9FgRh6iW-GeERXYAKCdlS8sz2yzyQmh8RbMOiV8hsSbTw5NjM8tXuJXau3sEXyWCLox5FAd_3iJe6rSdidsP3ngPxznhhsyS1H4cXIYVmebYFDNz4dr-hhYxcI59LfMTEO8ItJ0Iu5mDR21MpEZ_KJVxhTO7MI17o_h5yKCOGO3sYeTm-ct4YKlFW4pTEhe12jHTln-gcZzJ7YmEYcQYDh857aM0lJGjSJwxA6SVwE8Xb96SHdfNOmCWece5URHP7lfyfr3LquCMgWUd3IPFFOMgiHSDNvTuVhBBTbajsCzLt1LcKjO4BgetDpHGosv4mgG0wz0_njGi4E5zqdvs4kYNUWlEwfkoctKt16iik-WIKVzjllLMO2544YnqMeNElGDGeJkMUpmMPFQcZc1kUvBXQODavHIO9QDBD23T8KlrGMhFU48C5hkqnr6Iyr0x6oNmVOY0BQ1Vh2hsYXAUNMu7HQXiJFSKl2MD06OgLT55Tpdkts_HUNSl1woo8cqNvWzqplWuI1BF1ULiMBuKbuI8aXWmGtwtg6W9PjZ-vB7Yi2qJlYPgi0EghFH_v0Ywl88oLDBm2qgQBQK-Bnrf2ZwpoZ8py-TGpjOfoxJu7AzfTSOSV5roxiRk2c0yrxKFjrh5fgvIDtzCz2UbAKGbdVf6cXWkhZZpTyv1mB8aeDEAxTz2GdzE3_lENPG7AhbIZrXCsb7ImD__LCaZeQBiIY_9fhaLxrq1aJRfdaC-iA59GiTZu9YOSAFDB9JzVAdK3bZtUscyww8NeXumonideGhKAqIAob7B0NQQmZ9PkKR7s0OKrcDaUly_BeCboFKerT6"
+DBX_PATH = "/estack.db"  # path inside Dropbox app folder
+LOCAL_DB = "estack.db"   # your SQLite file
+
+def upload_db():
+    """Upload local estack.db to Dropbox"""
+    try:
+        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+        with open(LOCAL_DB, "rb") as f:
+            dbx.files_upload(f.read(), DBX_PATH, mode=dropbox.files.WriteMode("overwrite"))
+        print("✅ estack.db uploaded to Dropbox.")
+    except Exception as e:
+        print("Dropbox upload failed:", e)
+
+def download_db():
+    """Download estack.db from Dropbox (run on app startup)"""
+    try:
+        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+        with open(LOCAL_DB, "wb") as f:
+            metadata, res = dbx.files_download(DBX_PATH)
+            f.write(res.content)
+        print("✅ estack.db downloaded from Dropbox.")
+    except dropbox.exceptions.ApiError as e:
+        print("⚠️ No existing estack.db found in Dropbox (starting fresh)")
+
+
 # -------------------------
 # API CONFIGURATION
 # -------------------------
@@ -1822,6 +1851,7 @@ if __name__ == "__main__":
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
