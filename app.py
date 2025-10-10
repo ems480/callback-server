@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+# 3
 from flask import Flask, request, jsonify, g
 import os, logging, sqlite3, json, requests, uuid
 from datetime import datetime
@@ -1905,6 +1906,7 @@ def get_investment_status(deposit_id):
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
