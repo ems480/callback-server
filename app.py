@@ -1517,34 +1517,52 @@ def deposit_callback():
 
 # -------------------------
 # DEPOSIT STATUS / TRANSACTION LOOKUP
-# -------------------------
+# # -------------------------
 @app.route("/deposit_status/<deposit_id>")
 def deposit_status(deposit_id):
     db = get_db()
-    row = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
+    row = db.execute("SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ?", 
+                     (f"%{deposit_id}%",)).fetchone()
     if not row:
         return jsonify({"status": None, "message": "Deposit not found"}), 404
-    res = {k: row[k] for k in row.keys()}
-    if res.get("metadata"):
-        try:
-            res["metadata"] = json.loads(res["metadata"])
-        except:
-            pass
-    return jsonify(res), 200
+    return jsonify(dict(row)), 200
 
 @app.route("/transactions/<deposit_id>")
 def get_transaction(deposit_id):
     db = get_db()
-    row = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
+    row = db.execute("SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ?", 
+                     (f"%{deposit_id}%",)).fetchone()
     if not row:
         return jsonify({"error": "not found"}), 404
-    res = {k: row[k] for k in row.keys()}
-    if res.get("metadata"):
-        try:
-            res["metadata"] = json.loads(res["metadata"])
-        except:
-            pass
-    return jsonify(res), 200
+    return jsonify(dict(row)), 200
+
+# @app.route("/deposit_status/<deposit_id>")
+# def deposit_status(deposit_id):
+#     db = get_db()
+#     row = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
+#     if not row:
+#         return jsonify({"status": None, "message": "Deposit not found"}), 404
+#     res = {k: row[k] for k in row.keys()}
+#     if res.get("metadata"):
+#         try:
+#             res["metadata"] = json.loads(res["metadata"])
+#         except:
+#             pass
+#     return jsonify(res), 200
+
+# @app.route("/transactions/<deposit_id>")
+# def get_transaction(deposit_id):
+#     db = get_db()
+#     row = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
+#     if not row:
+#         return jsonify({"error": "not found"}), 404
+#     res = {k: row[k] for k in row.keys()}
+#     if res.get("metadata"):
+#         try:
+#             res["metadata"] = json.loads(res["metadata"])
+#         except:
+#             pass
+#     return jsonify(res), 200
 
 # -------------------------
 # INVESTMENT ENDPOINTS (Using estack.db)
@@ -1904,6 +1922,7 @@ def get_investment_status(deposit_id):
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
