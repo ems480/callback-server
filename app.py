@@ -952,26 +952,26 @@ def debug_transactions():
 # GET PENDING REQUESTS
 #----------------------------------
 
-@app.route("/api/loans/pending", methods=["GET"])
-def get_pending_loans():
-    conn = sqlite3.connect(DATABASE)
-    cur = conn.cursor()
-    cur.execute("SELECT loanId, user_id, amount, interest, status, expected_return_date FROM loans WHERE status = ?", ("PENDING",))
-    rows = cur.fetchall()
-    conn.close()
+# @app.route("/api/loans/pending", methods=["GET"])
+# def get_pending_loans():
+#     conn = sqlite3.connect(DATABASE)
+#     cur = conn.cursor()
+#     cur.execute("SELECT loanId, user_id, amount, interest, status, expected_return_date FROM loans WHERE status = ?", ("PENDING",))
+#     rows = cur.fetchall()
+#     conn.close()
 
-    loans = []
-    for row in rows:
-        loans.append({
-            "loanId": row[0],
-            "user_id": row[1],
-            "amount": row[2],
-            "interest": row[3],
-            "status": row[4],
-            "expected_return_date": row[5]
-        })
+#     loans = []
+#     for row in rows:
+#         loans.append({
+#             "loanId": row[0],
+#             "user_id": row[1],
+#             "amount": row[2],
+#             "interest": row[3],
+#             "status": row[4],
+#             "expected_return_date": row[5]
+#         })
 
-    return jsonify(loans), 200
+#     return jsonify(loans), 200
 
 # -------------------------
 # DISBURSE LOAN (ADMIN ACTION)
@@ -1922,6 +1922,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
