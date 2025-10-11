@@ -1677,65 +1677,65 @@ def get_investment_status(deposit_id):
         print("Error in get_investment_status:", e)
         return jsonify({"error": str(e)}), 500
 
-# # +++++++++++++++++++++++++++++++++++++++
-# # Rerieving loans requests
-# # +++++++++++++++++++++++++++++++++++++++
-# @app.route("/api/loans/user/<user_id>", methods=["GET"])
-# def get_user_loans(user_id):
-#     try:
-#         db = get_db()
-#         rows = db.execute("""
-#             SELECT name, status
-#             FROM transactions
-#             WHERE name LIKE ?
-#             ORDER BY rowid DESC
-#         """, (f"%{user_id}%",)).fetchall()
+# +++++++++++++++++++++++++++++++++++++++
+# Rerieving loans requests
+# +++++++++++++++++++++++++++++++++++++++
+@app.route("/api/loans/user/<user_id>", methods=["GET"])
+def get_user_loans(user_id):
+    try:
+        db = get_db()
+        rows = db.execute("""
+            SELECT name, status
+            FROM transactions
+            WHERE name LIKE ?
+            ORDER BY rowid DESC
+        """, (f"%{user_id}%",)).fetchall()
 
-#         results = []
-#         for r in rows:
-#             name = r["name"]
-#             status = r["status"]
+        results = []
+        for r in rows:
+            name = r["name"]
+            status = r["status"]
 
-#             # Try to split the stored name like: "ZMW500 | user_1 | some-loan-id"
-#             parts = [p.strip() for p in name.split("|")]
-#             amount, borrower_id, loan_id = parts if len(parts) == 3 else ("N/A", user_id, "N/A")
+            # Try to split the stored name like: "ZMW500 | user_1 | some-loan-id"
+            parts = [p.strip() for p in name.split("|")]
+            amount, borrower_id, loan_id = parts if len(parts) == 3 else ("N/A", user_id, "N/A")
 
-#             results.append({
-#                 "loan_id": loan_id,
-#                 "amount": amount,
-#                 "status": status,
-#                 "borrower_id": borrower_id
-#             })
+            results.append({
+                "loan_id": loan_id,
+                "amount": amount,
+                "status": status,
+                "borrower_id": borrower_id
+            })
 
-#         return jsonify(results), 200
+        return jsonify(results), 200
 
-#     except Exception as e:
-#         logger.exception("Error fetching user loans")
-#         return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        logger.exception("Error fetching user loans")
+        return jsonify({"error": str(e)}), 500
 
-# #-----------------------------------
-# # GET PENDING REQUESTS
-# #----------------------------------
-# @app.route("/api/loans/pending", methods=["GET"])
-# def get_pending_loans():
-#     conn = sqlite3.connect(DATABASE)
-#     cur = conn.cursor()
-#     cur.execute("SELECT loanId, user_id, amount, interest, status, expected_return_date FROM loans WHERE status = ?", ("PENDING",))
-#     rows = cur.fetchall()
-#     conn.close()
+#-----------------------------------
+# GET PENDING REQUESTS
+#----------------------------------
+@app.route("/api/loans/pending", methods=["GET"])
+def get_pending_loans():
+    conn = sqlite3.connect(DATABASE)
+    cur = conn.cursor()
+    cur.execute("SELECT loanId, user_id, amount, interest, status, expected_return_date FROM loans WHERE status = ?", ("PENDING",))
+    rows = cur.fetchall()
+    conn.close()
 
-#     loans = []
-#     for row in rows:
-#         loans.append({
-#             "loanId": row[0],
-#             "user_id": row[1],
-#             "amount": row[2],
-#             "interest": row[3],
-#             "status": row[4],
-#             "expected_return_date": row[5]
-#         })
+    loans = []
+    for row in rows:
+        loans.append({
+            "loanId": row[0],
+            "user_id": row[1],
+            "amount": row[2],
+            "interest": row[3],
+            "status": row[4],
+            "expected_return_date": row[5]
+        })
 
-#     return jsonify(loans), 200
+    return jsonify(loans), 200
 
 # # -------------------------
 # # DISBURSE LOAN (ADMIN ACTION)
@@ -1922,6 +1922,7 @@ def get_investment_status(deposit_id):
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
