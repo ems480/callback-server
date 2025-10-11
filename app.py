@@ -437,7 +437,6 @@ def get_user_loans(user_id):
         print("❌ Error fetching loans:", e)
         return jsonify({"error": str(e)}), 500
 
-
 # ------------------------
 # 3️⃣ MARK LOAN AS REPAID
 # ------------------------
@@ -1835,41 +1834,41 @@ def get_investment_status(deposit_id):
         print("Error in get_investment_status:", e)
         return jsonify({"error": str(e)}), 500
 
-# +++++++++++++++++++++++++++++++++++++++
-# Rerieving loans requests
-# +++++++++++++++++++++++++++++++++++++++
-@app.route("/api/loans/user/<user_id>", methods=["GET"])
-def get_user_loans(user_id):
-    try:
-        db = get_db()
-        rows = db.execute("""
-            SELECT name, status
-            FROM transactions
-            WHERE name LIKE ?
-            ORDER BY rowid DESC
-        """, (f"%{user_id}%",)).fetchall()
+# # +++++++++++++++++++++++++++++++++++++++
+# # Rerieving loans requests
+# # +++++++++++++++++++++++++++++++++++++++
+# @app.route("/api/loans/user/<user_id>", methods=["GET"])
+# def get_user_loans(user_id):
+#     try:
+#         db = get_db()
+#         rows = db.execute("""
+#             SELECT name, status
+#             FROM transactions
+#             WHERE name LIKE ?
+#             ORDER BY rowid DESC
+#         """, (f"%{user_id}%",)).fetchall()
 
-        results = []
-        for r in rows:
-            name = r["name"]
-            status = r["status"]
+#         results = []
+#         for r in rows:
+#             name = r["name"]
+#             status = r["status"]
 
-            # Try to split the stored name like: "ZMW500 | user_1 | some-loan-id"
-            parts = [p.strip() for p in name.split("|")]
-            amount, borrower_id, loan_id = parts if len(parts) == 3 else ("N/A", user_id, "N/A")
+#             # Try to split the stored name like: "ZMW500 | user_1 | some-loan-id"
+#             parts = [p.strip() for p in name.split("|")]
+#             amount, borrower_id, loan_id = parts if len(parts) == 3 else ("N/A", user_id, "N/A")
 
-            results.append({
-                "loan_id": loan_id,
-                "amount": amount,
-                "status": status,
-                "borrower_id": borrower_id
-            })
+#             results.append({
+#                 "loan_id": loan_id,
+#                 "amount": amount,
+#                 "status": status,
+#                 "borrower_id": borrower_id
+#             })
 
-        return jsonify(results), 200
+#         return jsonify(results), 200
 
-    except Exception as e:
-        logger.exception("Error fetching user loans")
-        return jsonify({"error": str(e)}), 500
+#     except Exception as e:
+#         logger.exception("Error fetching user loans")
+#         return jsonify({"error": str(e)}), 500
 
 #-----------------------------------
 # GET PENDING REQUESTS
@@ -2080,6 +2079,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
