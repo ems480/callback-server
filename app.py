@@ -324,33 +324,191 @@ with app.app_context():
 # -------------------------
 # REQUEST A LOAN
 # # -------------------------
+import uuid
+import sqlite3
+from flask import Flask, jsonify, request
+from datetime import datetime
 
-@app.route("/api/loans/request", methods=["POST"])
+app = Flask(__name__)
+
+DB_PATH = "estack.db"
+
+def get_db():
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    return db
+
+
+# ------------------------
+# 1️⃣ REQUEST A LOAN
+# ------------------------
+@app.route("/api/transactions/request", methods=["POST"])
 def request_loan():
-    data = request.json
-    user_id = data.get("user_id")
-    investment_id = data.get("investment_id")
-    amount = data.get("amount")
-    interest = data.get("interest", 5)
-    expected_return_date = data.get("expected_return_date")
-    phone = data.get("phone")  # <- NEW
+    try:
+        data = request.get_json(force=True)
+        phone = data.get("phone")
+        amount = data.get("amount")
+        user_id = data.get("user_id")
+        investment_id = data.get("investment_id")
+        expected_return_date = data.get("expected_return_date", "")
+        interest = data.get("interest", 0)
 
-    if not user_id or not amount or not expected_return_date or not investment_id or not phone:
-        return jsonify({"error": "Missing required fields"}), 400
+        if not phone or not user_id or not investment_id or not amount:
+            return jsonify({"error": "Missing required fields"}), 400
 
-    loanId = str(uuid.uuid4())
-    created_at = datetime.utcnow().isoformat()
+        db = get_db()
+        cur = db.cursor()
 
-    conn = sqlite3.connect(DATABASE)
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO loans (loanId, user_id, investment_id, amount, interest, status, expected_return_date, created_at, phone)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (loanId, user_id, investment_id, amount, interest, "PENDING", expected_return_date, created_at, phone))
-    conn.commit()
-    conn.close()
+        # ✅ Check if investment exists and is ACCEPTED
+        cur.execute("SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{investment_id}%",))
+        investment = cur.fetchone()
 
-    return jsonify({"loanId": loanId, "status": "PENDING"}), 200
+        if not investment:
+            db.close()
+            return jsonify({"error": "Investment not found"}), 404
+
+        if investment["status"].upper() != "ACCEPTED":
+            db.close()
+            return jsonify({"error": f"Investment not available (status={investment['status']})"}), 400
+
+        # ✅ Generate loan transaction
+        loan_id = str(uuid.uuid4())
+        loan_name = f"LOAN | ZMW{amount} | {user_id} | {loan_id}"
+
+        # Insert loan transaction
+        cur.execute(
+            "INSERT INTO estack_transactions (name_of_transaction, status) VALUES (?, ?)",
+            (loan_name, "ACTIVE")
+        )
+
+        # Update linked investment to IN_USE
+        cur.execute(
+            "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ?",
+            ("IN_USE", f"%{investment_id}%")
+        )
+
+        db.commit()
+        db.close()
+
+        print(f"💰 Loan {loan_id} created for user {user_id}, investment {investment_id}")
+
+        return jsonify({
+            "message": "Loan request recorded successfully",
+            "loanId": loan_id,
+            "status": "ACTIVE"
+        }), 200
+
+    except Exception as e:
+        print("❌ Error in /api/transactions/request:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ------------------------
+# 2️⃣ GET USER LOANS
+# ------------------------
+@app.route("/api/loans/user/<user_id>", methods=["GET"])
+def get_user_loans(user_id):
+    try:
+        db = get_db()
+        cur = db.cursor()
+
+        cur.execute(
+            "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND name_of_transaction LIKE ?",
+            ("%LOAN%", f"%{user_id}%")
+        )
+        rows = cur.fetchall()
+        db.close()
+
+        results = []
+        for r in rows:
+            name = r["name_of_transaction"]
+            parts = [p.strip() for p in name.split("|")]
+            entry = {
+                "name": name,
+                "loanId": parts[-1] if len(parts) > 3 else "N/A",
+                "amount": parts[1] if len(parts) > 1 else "N/A",
+                "status": r["status"]
+            }
+            results.append(entry)
+
+        return jsonify(results), 200
+
+    except Exception as e:
+        print("❌ Error fetching loans:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ------------------------
+# 3️⃣ MARK LOAN AS REPAID
+# ------------------------
+@app.route("/api/loans/repay/<loan_id>", methods=["POST"])
+def repay_loan(loan_id):
+    try:
+        db = get_db()
+        cur = db.cursor()
+
+        # ✅ Find the loan
+        cur.execute("SELECT name_of_transaction FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{loan_id}%",))
+        loan = cur.fetchone()
+
+        if not loan:
+            db.close()
+            return jsonify({"error": "Loan not found"}), 404
+
+        # ✅ Mark loan as REPAID
+        cur.execute(
+            "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ?",
+            ("REPAID", f"%{loan_id}%")
+        )
+
+        # ✅ Find linked investment ID (4th part of transaction)
+        parts = [p.strip() for p in loan["name_of_transaction"].split("|")]
+        user_id = parts[2] if len(parts) > 2 else None
+
+        # Mark investment AVAILABLE again
+        if user_id:
+            cur.execute(
+                "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ? AND name_of_transaction NOT LIKE ?",
+                ("AVAILABLE", f"%{user_id}%", "%LOAN%")
+            )
+
+        db.commit()
+        db.close()
+
+        print(f"✅ Loan {loan_id} repaid, investment reset to AVAILABLE")
+
+        return jsonify({"message": "Loan repaid successfully"}), 200
+
+    except Exception as e:
+        print("❌ Error in repay_loan:", e)
+        return jsonify({"error": str(e)}), 500
+
+# @app.route("/api/loans/request", methods=["POST"])
+# def request_loan():
+#     data = request.json
+#     user_id = data.get("user_id")
+#     investment_id = data.get("investment_id")
+#     amount = data.get("amount")
+#     interest = data.get("interest", 5)
+#     expected_return_date = data.get("expected_return_date")
+#     phone = data.get("phone")  # <- NEW
+
+#     if not user_id or not amount or not expected_return_date or not investment_id or not phone:
+#         return jsonify({"error": "Missing required fields"}), 400
+
+#     loanId = str(uuid.uuid4())
+#     created_at = datetime.utcnow().isoformat()
+
+#     conn = sqlite3.connect(DATABASE)
+#     cur = conn.cursor()
+#     cur.execute("""
+#         INSERT INTO loans (loanId, user_id, investment_id, amount, interest, status, expected_return_date, created_at, phone)
+#         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+#     """, (loanId, user_id, investment_id, amount, interest, "PENDING", expected_return_date, created_at, phone))
+#     conn.commit()
+#     conn.close()
+
+#     return jsonify({"loanId": loanId, "status": "PENDING"}), 200
 
 # -------------------------
 # LIST PENDING LOANS (ADMIN VIEW)
@@ -1922,6 +2080,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
