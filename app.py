@@ -482,6 +482,52 @@ def repay_loan(loan_id):
         print("❌ Error in repay_loan:", e)
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/transactions/request", methods=["POST"])
+def create_transaction():
+    try:
+        data = request.get_json(force=True)
+
+        # Accept both naming styles for safety
+        phone = data.get("phone") or data.get("borrower_phone")
+        investment_id = data.get("investment_id")
+        amount = data.get("amount")
+
+        # Basic validation
+        if not phone or not investment_id or not amount:
+            return jsonify({"error": "Missing required fields"}), 400
+
+        db = get_db()
+        cur = db.cursor()
+
+        # Generate loan ID
+        import uuid
+        loan_id = str(uuid.uuid4())
+
+        # Build transaction string for eStack table
+        # Format: "LOAN | K1000 | +260977364437 | inv_123 | loan_abc123"
+        name_of_transaction = f"LOAN | K{amount} | {phone} | {investment_id} | {loan_id}"
+
+        # Insert into estack_transactions
+        cur.execute(
+            "INSERT INTO estack_transactions (name_of_transaction, status) VALUES (?, ?)",
+            (name_of_transaction, "ACTIVE")
+        )
+
+        db.commit()
+        db.close()
+
+        print(f"✅ Loan created: {name_of_transaction}")
+
+        return jsonify({
+            "message": "Loan request recorded successfully",
+            "loanId": loan_id,
+            "status": "ACTIVE"
+        }), 200
+
+    except Exception as e:
+        print("❌ Error in create_transaction:", e)
+        return jsonify({"error": str(e)}), 500
+
 # @app.route("/api/loans/request", methods=["POST"])
 # def request_loan():
 #     data = request.json
@@ -2079,6 +2125,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
