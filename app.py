@@ -362,7 +362,10 @@ def request_loan():
         db = get_db()
         cur = db.cursor()
 #_________________________________________________________________________________________________
-        cur.execute("SELECT name_of_transaction FROM estack_transactions WHERE status = 'COMPLETED'")
+        # cur.execute("SELECT name_of_transaction FROM estack_transactions WHERE status = 'COMPLETED'")
+        cur.execute(
+                "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND status = 'COMPLETED'",
+                (f"%{investment_id}%",)
         row = cur.fetchone()
 
         if not row:
@@ -2277,6 +2280,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
