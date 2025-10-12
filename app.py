@@ -386,11 +386,12 @@ def request_loan():
 
         if not investment:
             db.close()
-            print(investment["status"].upper())# != "ACCEPTED"
+            print("Status: " + str(investment["status"].upper()))# != "ACCEPTED"
             return jsonify({"error": "Investment not found"}), 404
 
         # if investment["status"].upper() != "ACCEPTED":
         db.close()
+        print("Status: " + str(investment["status"].upper()))
         return jsonify({"error": f"Investment not available (status={investment['status']})"}), 400
 
         # ✅ Generate loan transaction
@@ -2263,6 +2264,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
