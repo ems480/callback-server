@@ -350,6 +350,8 @@ def request_loan():
         amount = data.get("amount")
         # user_id = data.get("user_id")
         investment_id = data.get("investment_id")
+
+        print(str(investment_id) + "from client")
         # expected_return_date = data.get("expected_return_date", "")
         # interest = data.get("interest", 0)
 
@@ -379,6 +381,7 @@ def request_loan():
                 "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND status = 'COMPLETED'",
                 (f"%{investment_id}%",)
             )
+            # print(str(
 #_____________________________________________________________________________________________________________
         # ✅ Check if investment exists and is ACCEPTED
         # cur.execute("SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{investment_id}%",))
@@ -2274,6 +2277,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
