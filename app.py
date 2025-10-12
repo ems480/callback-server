@@ -359,9 +359,15 @@ def request_loan():
 
         db = get_db()
         cur = db.cursor()
-
+#_________________________________________________________________________________________________
         cur.execute("SELECT name_of_transaction FROM estack_transactions WHERE status = 'ACCEPTED'")
         row = cur.fetchone()
+
+        if not row:
+            db.close()
+            return jsonify({"error": "No accepted transactions found"}), 404
+        
+        name_of_transaction = row["name_of_transaction"]
         
         # Extract investment ID (last element)
         parts = [p.strip() for p in name_of_transaction.split("|")]
@@ -373,6 +379,7 @@ def request_loan():
                 "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND status = 'ACCEPTED'",
                 (f"%{investment_id}%",)
             )
+#_____________________________________________________________________________________________________________
         # ✅ Check if investment exists and is ACCEPTED
         # cur.execute("SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{investment_id}%",))
         investment = cur.fetchone()
@@ -2255,6 +2262,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
