@@ -403,6 +403,40 @@ def request_loan():
         return jsonify({"error": str(e)}), 500
 
 
+# # ------------------------
+# # 2️⃣ GET USER LOANS
+# # ------------------------
+# @app.route("/api/loans/user/<user_id>", methods=["GET"])
+# def get_user_loans(user_id):
+#     try:
+#         db = get_db()
+#         cur = db.cursor()
+
+#         cur.execute(
+#             "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND name_of_transaction LIKE ?",
+#             ("%LOAN%", f"%{user_id}%")
+#         )
+#         rows = cur.fetchall()
+#         db.close()
+
+#         results = []
+#         for r in rows:
+#             name = r["name_of_transaction"]
+#             parts = [p.strip() for p in name.split("|")]
+#             entry = {
+#                 "name": name,
+#                 "loanId": parts[-1] if len(parts) > 3 else "N/A",
+#                 "amount": parts[1] if len(parts) > 1 else "N/A",
+#                 "status": r["status"]
+#             }
+#             results.append(entry)
+
+#         return jsonify(results), 200
+
+#     except Exception as e:
+#         print("❌ Error fetching loans:", e)
+#         return jsonify({"error": str(e)}), 500
+
 # ------------------------
 # 2️⃣ GET USER LOANS
 # ------------------------
@@ -412,8 +446,13 @@ def get_user_loans(user_id):
         db = get_db()
         cur = db.cursor()
 
+        # Fetch only loan-related transactions for this user
         cur.execute(
-            "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND name_of_transaction LIKE ?",
+            """
+            SELECT * FROM estack_transactions
+            WHERE name_of_transaction LIKE ? AND name_of_transaction LIKE ?
+            ORDER BY rowid DESC
+            """,
             ("%LOAN%", f"%{user_id}%")
         )
         rows = cur.fetchall()
@@ -423,10 +462,12 @@ def get_user_loans(user_id):
         for r in rows:
             name = r["name_of_transaction"]
             parts = [p.strip() for p in name.split("|")]
+
+            # Expected format: "LOAN | K1000 | user_id | loan_id"
             entry = {
-                "name": name,
-                "loanId": parts[-1] if len(parts) > 3 else "N/A",
-                "amount": parts[1] if len(parts) > 1 else "N/A",
+                "loan_id": parts[-1] if len(parts) > 3 else "N/A",
+                "amount": parts[1].replace("K", "").strip() if len(parts) > 1 else "N/A",
+                "user_id": parts[2] if len(parts) > 2 else "N/A",
                 "status": r["status"]
             }
             results.append(entry)
@@ -437,6 +478,7 @@ def get_user_loans(user_id):
         print("❌ Error fetching loans:", e)
         return jsonify({"error": str(e)}), 500
 
+
 # ------------------------
 # 3️⃣ MARK LOAN AS REPAID
 # ------------------------
@@ -446,35 +488,43 @@ def repay_loan(loan_id):
         db = get_db()
         cur = db.cursor()
 
-        # ✅ Find the loan
-        cur.execute("SELECT name_of_transaction FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{loan_id}%",))
+        # Find the loan transaction
+        cur.execute(
+            "SELECT name_of_transaction FROM estack_transactions WHERE name_of_transaction LIKE ?",
+            (f"%{loan_id}%",)
+        )
         loan = cur.fetchone()
 
         if not loan:
             db.close()
             return jsonify({"error": "Loan not found"}), 404
 
-        # ✅ Mark loan as REPAID
+        # Mark the loan as REPAID
         cur.execute(
             "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ?",
             ("REPAID", f"%{loan_id}%")
         )
 
-        # ✅ Find linked investment ID (4th part of transaction)
+        # Extract user_id from transaction
         parts = [p.strip() for p in loan["name_of_transaction"].split("|")]
         user_id = parts[2] if len(parts) > 2 else None
 
-        # Mark investment AVAILABLE again
+        # Make the user's investment AVAILABLE again
         if user_id:
             cur.execute(
-                "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ? AND name_of_transaction NOT LIKE ?",
+                """
+                UPDATE estack_transactions
+                SET status = ?
+                WHERE name_of_transaction LIKE ?
+                AND name_of_transaction NOT LIKE ?
+                """,
                 ("AVAILABLE", f"%{user_id}%", "%LOAN%")
             )
 
         db.commit()
         db.close()
 
-        print(f"✅ Loan {loan_id} repaid, investment reset to AVAILABLE")
+        print(f"✅ Loan {loan_id} repaid — investment set to AVAILABLE")
 
         return jsonify({"message": "Loan repaid successfully"}), 200
 
@@ -482,51 +532,50 @@ def repay_loan(loan_id):
         print("❌ Error in repay_loan:", e)
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/transactions/request", methods=["POST"])
-def create_transaction():
-    try:
-        data = request.get_json(force=True)
+# # ------------------------
+# # 3️⃣ MARK LOAN AS REPAID
+# # ------------------------
+# @app.route("/api/loans/repay/<loan_id>", methods=["POST"])
+# def repay_loan(loan_id):
+#     try:
+#         db = get_db()
+#         cur = db.cursor()
 
-        # Accept both naming styles for safety
-        phone = data.get("phone") or data.get("borrower_phone")
-        investment_id = data.get("investment_id")
-        amount = data.get("amount")
+#         # ✅ Find the loan
+#         cur.execute("SELECT name_of_transaction FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{loan_id}%",))
+#         loan = cur.fetchone()
 
-        # Basic validation
-        if not phone or not investment_id or not amount:
-            return jsonify({"error": "Missing required fields"}), 400
+#         if not loan:
+#             db.close()
+#             return jsonify({"error": "Loan not found"}), 404
 
-        db = get_db()
-        cur = db.cursor()
+#         # ✅ Mark loan as REPAID
+#         cur.execute(
+#             "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ?",
+#             ("REPAID", f"%{loan_id}%")
+#         )
 
-        # Generate loan ID
-        import uuid
-        loan_id = str(uuid.uuid4())
+#         # ✅ Find linked investment ID (4th part of transaction)
+#         parts = [p.strip() for p in loan["name_of_transaction"].split("|")]
+#         user_id = parts[2] if len(parts) > 2 else None
 
-        # Build transaction string for eStack table
-        # Format: "LOAN | K1000 | +260977364437 | inv_123 | loan_abc123"
-        name_of_transaction = f"LOAN | K{amount} | {phone} | {investment_id} | {loan_id}"
+#         # Mark investment AVAILABLE again
+#         if user_id:
+#             cur.execute(
+#                 "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ? AND name_of_transaction NOT LIKE ?",
+#                 ("AVAILABLE", f"%{user_id}%", "%LOAN%")
+#             )
 
-        # Insert into estack_transactions
-        cur.execute(
-            "INSERT INTO estack_transactions (name_of_transaction, status) VALUES (?, ?)",
-            (name_of_transaction, "ACTIVE")
-        )
+#         db.commit()
+#         db.close()
 
-        db.commit()
-        db.close()
+#         print(f"✅ Loan {loan_id} repaid, investment reset to AVAILABLE")
 
-        print(f"✅ Loan created: {name_of_transaction}")
+#         return jsonify({"message": "Loan repaid successfully"}), 200
 
-        return jsonify({
-            "message": "Loan request recorded successfully",
-            "loanId": loan_id,
-            "status": "ACTIVE"
-        }), 200
-
-    except Exception as e:
-        print("❌ Error in create_transaction:", e)
-        return jsonify({"error": str(e)}), 500
+#     except Exception as e:
+#         print("❌ Error in repay_loan:", e)
+#         return jsonify({"error": str(e)}), 500
 
 # @app.route("/api/loans/request", methods=["POST"])
 # def request_loan():
@@ -2125,6 +2174,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
