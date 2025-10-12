@@ -341,6 +341,10 @@ def get_db():
 
 # ------------------------
 # 1️⃣ REQUEST A LOAN
+# # ------------------------
+
+# ------------------------
+# 1️⃣ REQUEST A LOAN
 # ------------------------
 @app.route("/api/transactions/request", methods=["POST"])
 def request_loan():
@@ -348,79 +352,45 @@ def request_loan():
         data = request.get_json(force=True)
         phone = data.get("phone")
         amount = data.get("amount")
-        # user_id = data.get("user_id")
         investment_id = data.get("investment_id")
 
-        print(str(investment_id) + "from client")
-        # expected_return_date = data.get("expected_return_date", "")
-        # interest = data.get("interest", 0)
+        print(f"📨 Received investment_id: {investment_id}")
 
-        # if not phone or not user_id or not investment_id or not amount:
+        # ✅ Validate required fields
         if not phone or not investment_id or not amount:
             return jsonify({"error": "Missing required fields"}), 400
 
         db = get_db()
         cur = db.cursor()
-#_________________________________________________________________________________________________
-        # cur.execute("SELECT name_of_transaction FROM estack_transactions WHERE status = 'COMPLETED'")
-        cur.execute(
-                "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND status = 'COMPLETED'",
-                (f"%{investment_id}%",)
-            )
-        row = cur.fetchone()
 
-        if not row:
-            db.close()
-            return jsonify({"error": "No accepted transactions found"}), 404
-        
-        name_of_transaction = row["name_of_transaction"]
-        
-        # Extract investment ID (last element)
-        parts = [p.strip() for p in name_of_transaction.split("|")]
-        investment_id = parts[-1] if parts else None
-        
-        if investment_id:
-            # ✅ Check if investment exists and is ACCEPTED
-            cur.execute(
-                "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND status = 'COMPLETED'",
-                (f"%{investment_id}%",)
-            )
-            # print(str(
-#_____________________________________________________________________________________________________________
-        # ✅ Check if investment exists and is ACCEPTED
-        # cur.execute("SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{investment_id}%",))
+        # ✅ Find investment that includes this ID and is COMPLETED
+        cur.execute(
+            """
+            SELECT * FROM estack_transactions 
+            WHERE name_of_transaction LIKE ? 
+            AND status = 'COMPLETED'
+            """,
+            (f"%{investment_id}%",)
+        )
         investment = cur.fetchone()
-        # inv = cur.fetchone()
-        if investment:
-            print(f"✅ Found investment {investment_id}")
-        else:
-            print("❌ Investment not found or not accepted")
-        # else:
-        #     print("⚠️ Could not extract investment_id properly")
-            
-        print(str(investment))
+
         if not investment:
             db.close()
-            print("Status1: " + str(investment["status"].upper()))# != "ACCEPTED"
-            return jsonify({"error": "Investment not found"}), 404
+            return jsonify({"error": "Investment not found or not completed"}), 404
 
-        if investment["status"].upper() != "ACCEPTED":
-            db.close()
-            print("invest2: " + str(investment))
-            print("Status2: " + str(investment["status"].upper()))
-            return jsonify({"error": f"Investment not available (status={investment['status']})"}), 400
+        print(f"✅ Found matching investment: {investment['name_of_transaction']}")
 
-        # ✅ Generate loan transaction
+        # ✅ Generate unique loan ID and name
         loan_id = str(uuid.uuid4())
-        loan_name = f"LOAN | ZMW{amount} | {investment_id} | {loan_id}"
+        loan_name = f"LOAN | ZMW{amount} | {phone} | {investment_id} | {loan_id}"
 
-        # Insert loan transaction
+        # ✅ Insert new loan record
         cur.execute(
             "INSERT INTO estack_transactions (name_of_transaction, status) VALUES (?, ?)",
             (loan_name, "ACTIVE")
         )
 
-        # Update linked investment to IN_USE
+        # ✅ Mark investment as IN_USE
         cur.execute(
             "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ?",
             ("IN_USE", f"%{investment_id}%")
@@ -429,17 +399,121 @@ def request_loan():
         db.commit()
         db.close()
 
-        print(f"💰 Loan {loan_id} created for user {user_id}, investment {investment_id}")
+        print(f"💰 Loan {loan_id} created for borrower {phone} using investment {investment_id}")
 
         return jsonify({
             "message": "Loan request recorded successfully",
-            "loanId": loan_id,
+            "loan_id": loan_id,
             "status": "ACTIVE"
         }), 200
 
     except Exception as e:
         print("❌ Error in /api/transactions/request:", e)
         return jsonify({"error": str(e)}), 500
+
+
+
+
+
+
+# @app.route("/api/transactions/request", methods=["POST"])
+# def request_loan():
+#     try:
+#         data = request.get_json(force=True)
+#         phone = data.get("phone")
+#         amount = data.get("amount")
+#         # user_id = data.get("user_id")
+#         investment_id = data.get("investment_id")
+
+#         print(str(investment_id) + "from client")
+#         # expected_return_date = data.get("expected_return_date", "")
+#         # interest = data.get("interest", 0)
+
+#         # if not phone or not user_id or not investment_id or not amount:
+#         if not phone or not investment_id or not amount:
+#             return jsonify({"error": "Missing required fields"}), 400
+
+#         db = get_db()
+#         cur = db.cursor()
+# #_________________________________________________________________________________________________
+#         # cur.execute("SELECT name_of_transaction FROM estack_transactions WHERE status = 'COMPLETED'")
+#         cur.execute(
+#                 "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND status = 'COMPLETED'",
+#                 (f"%{investment_id}%",)
+#             )
+#         row = cur.fetchone()
+
+#         if not row:
+#             db.close()
+#             return jsonify({"error": "No accepted transactions found"}), 404
+        
+#         name_of_transaction = row["name_of_transaction"]
+        
+#         # Extract investment ID (last element)
+#         parts = [p.strip() for p in name_of_transaction.split("|")]
+#         investment_id = parts[-1] if parts else None
+        
+#         if investment_id:
+#             # ✅ Check if investment exists and is ACCEPTED
+#             cur.execute(
+#                 "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND status = 'COMPLETED'",
+#                 (f"%{investment_id}%",)
+#             )
+#             # print(str(
+# #_____________________________________________________________________________________________________________
+#         # ✅ Check if investment exists and is ACCEPTED
+#         # cur.execute("SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{investment_id}%",))
+#         investment = cur.fetchone()
+#         # inv = cur.fetchone()
+#         if investment:
+#             print(f"✅ Found investment {investment_id}")
+#         else:
+#             print("❌ Investment not found or not accepted")
+#         # else:
+#         #     print("⚠️ Could not extract investment_id properly")
+            
+#         print(str(investment))
+#         if not investment:
+#             db.close()
+#             print("Status1: " + str(investment["status"].upper()))# != "ACCEPTED"
+#             return jsonify({"error": "Investment not found"}), 404
+
+#         if investment["status"].upper() != "ACCEPTED":
+#             db.close()
+#             print("invest2: " + str(investment))
+#             print("Status2: " + str(investment["status"].upper()))
+#             return jsonify({"error": f"Investment not available (status={investment['status']})"}), 400
+
+#         # ✅ Generate loan transaction
+#         loan_id = str(uuid.uuid4())
+#         loan_name = f"LOAN | ZMW{amount} | {investment_id} | {loan_id}"
+
+#         # Insert loan transaction
+#         cur.execute(
+#             "INSERT INTO estack_transactions (name_of_transaction, status) VALUES (?, ?)",
+#             (loan_name, "ACTIVE")
+#         )
+
+#         # Update linked investment to IN_USE
+#         cur.execute(
+#             "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ?",
+#             ("IN_USE", f"%{investment_id}%")
+#         )
+
+#         db.commit()
+#         db.close()
+
+#         print(f"💰 Loan {loan_id} created for user {user_id}, investment {investment_id}")
+
+#         return jsonify({
+#             "message": "Loan request recorded successfully",
+#             "loanId": loan_id,
+#             "status": "ACTIVE"
+#         }), 200
+
+#     except Exception as e:
+#         print("❌ Error in /api/transactions/request:", e)
+#         return jsonify({"error": str(e)}), 500
 
 
 # # ------------------------
@@ -2281,6 +2355,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
