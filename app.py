@@ -383,6 +383,14 @@ def request_loan():
         # ✅ Check if investment exists and is ACCEPTED
         # cur.execute("SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{investment_id}%",))
         investment = cur.fetchone()
+        # inv = cur.fetchone()
+            if investment:
+                print(f"✅ Found investment {investment_id}")
+            else:
+                print("❌ Investment not found or not accepted")
+        else:
+            print("⚠️ Could not extract investment_id properly")
+            
         print(str(investment))
         if not investment:
             db.close()
@@ -2266,6 +2274,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
