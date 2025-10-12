@@ -348,12 +348,13 @@ def request_loan():
         data = request.get_json(force=True)
         phone = data.get("phone")
         amount = data.get("amount")
-        user_id = data.get("user_id")
+        # user_id = data.get("user_id")
         investment_id = data.get("investment_id")
-        expected_return_date = data.get("expected_return_date", "")
-        interest = data.get("interest", 0)
+        # expected_return_date = data.get("expected_return_date", "")
+        # interest = data.get("interest", 0)
 
-        if not phone or not user_id or not investment_id or not amount:
+        # if not phone or not user_id or not investment_id or not amount:
+        if not phone or not investment_id or not amount:
             return jsonify({"error": "Missing required fields"}), 400
 
         db = get_db()
@@ -373,7 +374,7 @@ def request_loan():
 
         # ✅ Generate loan transaction
         loan_id = str(uuid.uuid4())
-        loan_name = f"LOAN | ZMW{amount} | {user_id} | {loan_id}"
+        loan_name = f"LOAN | ZMW{amount} | {investment_id} | {loan_id}"
 
         # Insert loan transaction
         cur.execute(
@@ -2241,6 +2242,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
