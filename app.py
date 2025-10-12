@@ -360,23 +360,16 @@ def request_loan():
         db = get_db()
         cur = db.cursor()
 
-        # Assume 'name_of_transaction' string format is "ZMW500 | user_101 | 1234abcd"
-        cur.execute("SELECT name_of_transaction FROM estack_transactions WHERE status = 'ACCEPTED'")
-        row = cur.fetchone()
+        # Extract investment ID (last element)
+        parts = [p.strip() for p in name_of_transaction.split("|")]
+        investment_id = parts[-1] if parts else None
         
-        if row:
-            name = row["name_of_transaction"]
-            parts = [p.strip() for p in name.split("|")]
-        
-            # ✅ Extract investment ID (last element)
-            investment_id = parts[-1] if len(parts) > 2 else None
-        
-            if investment_id:
-                # ✅ Check if investment exists and is ACCEPTED
-                cur.execute(
-                    "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND status = 'ACCEPTED'",
-                    (f"%{investment_id}%",)
-                )
+        if investment_id:
+            # ✅ Check if investment exists and is ACCEPTED
+            cur.execute(
+                "SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ? AND status = 'ACCEPTED'",
+                (f"%{investment_id}%",)
+            )
         # ✅ Check if investment exists and is ACCEPTED
         # cur.execute("SELECT * FROM estack_transactions WHERE name_of_transaction LIKE ?", (f"%{investment_id}%",))
         investment = cur.fetchone()
@@ -2259,6 +2252,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
