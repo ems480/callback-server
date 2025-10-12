@@ -446,14 +446,14 @@ def get_user_loans(user_id):
         db = get_db()
         cur = db.cursor()
 
-        # Fetch only loan-related transactions for this user
+        # Fetch transactions linked to this user (investor or borrower)
         cur.execute(
             """
             SELECT * FROM estack_transactions
-            WHERE name_of_transaction LIKE ? AND name_of_transaction LIKE ?
+            WHERE name_of_transaction LIKE ?
             ORDER BY rowid DESC
             """,
-            ("%LOAN%", f"%{user_id}%")
+            (f"%{user_id}%",)
         )
         rows = cur.fetchall()
         db.close()
@@ -463,12 +463,21 @@ def get_user_loans(user_id):
             name = r["name_of_transaction"]
             parts = [p.strip() for p in name.split("|")]
 
-            # Expected format: "LOAN | K1000 | user_id | loan_id"
+            # Example:
+            # INVESTMENT | K1000 | user_12 | 0f59ea4f-bc6d | Borrower:260977364437
+            loan_id = parts[3] if len(parts) > 3 else "N/A"
+            amount = parts[1].replace("K", "").strip() if len(parts) > 1 else "N/A"
+            borrower = None
+
+            # Check for borrower info
+            if len(parts) > 4 and "Borrower:" in parts[4]:
+                borrower = parts[4].split(":", 1)[1]
+
             entry = {
-                "loan_id": parts[-1] if len(parts) > 3 else "N/A",
-                "amount": parts[1].replace("K", "").strip() if len(parts) > 1 else "N/A",
-                "user_id": parts[2] if len(parts) > 2 else "N/A",
-                "status": r["status"]
+                "loan_id": loan_id,
+                "amount": amount,
+                "borrower": borrower or "N/A",
+                "status": r["status"],
             }
             results.append(entry)
 
@@ -477,6 +486,64 @@ def get_user_loans(user_id):
     except Exception as e:
         print("❌ Error fetching loans:", e)
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/transactions/request", methods=["POST"])
+def create_loan_request():
+    try:
+        data = request.get_json()
+        required = ["borrower_phone", "investment_id", "amount"]
+        missing = [f for f in required if f not in data]
+
+        if missing:
+            return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
+
+        borrower_phone = data["borrower_phone"]
+        investment_id = data["investment_id"]
+        amount = data["amount"]
+
+        conn = get_db()
+        cur = conn.cursor()
+
+        # 🔍 1️⃣ Check if investment exists and is available
+        cur.execute(
+            "SELECT name_of_transaction, status FROM estack_transactions WHERE name_of_transaction LIKE ?",
+            (f"%{investment_id}%",)
+        )
+        investment = cur.fetchone()
+
+        if not investment:
+            conn.close()
+            return jsonify({"error": "Investment not found"}), 404
+
+        if investment["status"] != "AVAILABLE":
+            conn.close()
+            return jsonify({"error": "Investment already loaned or pending"}), 400
+
+        # 🧩 2️⃣ Update record to include borrower details
+        old_name = investment["name_of_transaction"]
+        # Example: "INVESTMENT | K1000 | user_12 | 0f59ea4f-bc6d"
+        new_name = f"{old_name} | Borrower:{borrower_phone}"
+
+        cur.execute(
+            "UPDATE estack_transactions SET name_of_transaction = ?, status = ? WHERE name_of_transaction = ?",
+            (new_name, "REQUESTED", old_name)
+        )
+
+        conn.commit()
+        conn.close()
+
+        print(f"✅ Loan requested: {new_name}")
+
+        return jsonify({
+            "message": "Loan request recorded successfully",
+            "investment_id": investment_id,
+            "status": "REQUESTED"
+        }), 200
+
+    except Exception as e:
+        print("❌ Error in /api/transactions/request:", e)
+        return jsonify({"error": str(e)}), 500
+
 
 
 # ------------------------
@@ -2174,6 +2241,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
