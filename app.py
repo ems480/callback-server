@@ -945,6 +945,7 @@ def initiate_payment():
         data = request.json
         phone = data.get("phone")
         amount = data.get("amount")
+
         if not phone or not amount:
             return jsonify({"error": "Missing phone or amount"}), 400
 
@@ -968,36 +969,88 @@ def initiate_payment():
         headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
         result = {}
+
         try:
             result = resp.json()
         except Exception:
             logger.warning("Non-JSON response from PawaPay for initiate-payment: %s", resp.text)
 
-        db = get_db()
-        db.execute("""
-            INSERT OR REPLACE INTO transactions
-            (depositId,status,amount,currency,phoneNumber,provider,
-             providerTransactionId,failureCode,failureMessage,metadata,received_at,type,user_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            deposit_id,
-            result.get("status", "PENDING"),
-            float(amount),
-            "ZMW",
-            phone,
-            None, None, None, None,
-            json.dumps(payload["metadata"]),
-            datetime.utcnow().isoformat(),
-            "payment",
-            None
-        ))
-        db.commit()
-        logger.info("initiate-payment: inserted depositId=%s status=%s", deposit_id, result.get("status", "PENDING"))
-        return jsonify({"depositId": deposit_id, **result}), 200
+        # 🧾 Removed all transaction.db writes
+        # ✅ Keep logs and return response for visibility
+        logger.info(
+            "Payment initiated: depositId=%s | phone=%s | amount=%s | status=%s",
+            deposit_id, phone, amount, result.get("status", "PENDING")
+        )
+
+        # ✅ Return result directly without saving to DB
+        return jsonify({
+            "depositId": deposit_id,
+            **result
+        }), 200
 
     except Exception:
         logger.exception("Payment initiation error")
         return jsonify({"error": "Internal server error"}), 500
+
+# @app.route("/initiate-payment", methods=["POST"])
+# def initiate_payment():
+#     try:
+#         data = request.json
+#         phone = data.get("phone")
+#         amount = data.get("amount")
+#         if not phone or not amount:
+#             return jsonify({"error": "Missing phone or amount"}), 400
+
+#         deposit_id = str(uuid.uuid4())
+#         customer_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+#         payload = {
+#             "depositId": deposit_id,
+#             "amount": str(amount),
+#             "currency": "ZMW",
+#             "correspondent": "MTN_MOMO_ZMB",
+#             "payer": {"type": "MSISDN", "address": {"value": phone}},
+#             "customerTimestamp": customer_ts,
+#             "statementDescription": "StudyCraftPay",
+#             "metadata": [
+#                 {"fieldName": "orderId", "fieldValue": "ORD-" + deposit_id},
+#                 {"fieldName": "customerId", "fieldValue": phone, "isPII": True},
+#             ],
+#         }
+
+#         headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
+#         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
+#         result = {}
+#         try:
+#             result = resp.json()
+#         except Exception:
+#             logger.warning("Non-JSON response from PawaPay for initiate-payment: %s", resp.text)
+
+#         db = get_db()
+#         db.execute("""
+#             INSERT OR REPLACE INTO transactions
+#             (depositId,status,amount,currency,phoneNumber,provider,
+#              providerTransactionId,failureCode,failureMessage,metadata,received_at,type,user_id)
+#             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+#         """, (
+#             deposit_id,
+#             result.get("status", "PENDING"),
+#             float(amount),
+#             "ZMW",
+#             phone,
+#             None, None, None, None,
+#             json.dumps(payload["metadata"]),
+#             datetime.utcnow().isoformat(),
+#             "payment",
+#             None
+#         ))
+#         db.commit()
+#         logger.info("initiate-payment: inserted depositId=%s status=%s", deposit_id, result.get("status", "PENDING"))
+#         return jsonify({"depositId": deposit_id, **result}), 200
+
+#     except Exception:
+#         logger.exception("Payment initiation error")
+#         return jsonify({"error": "Internal server error"}), 500
 
 # -------------------------
 # CALLBACK RECEIVER (upsert-safe for deposits and payouts)
@@ -2491,6 +2544,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
