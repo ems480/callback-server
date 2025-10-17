@@ -936,68 +936,16 @@ def home():
     return f"PawaPay Callback Receiver running ✅ (API_MODE={API_MODE})"
 
 
-# -------------------------
-# ORIGINAL PAYMENT ENDPOINTS
-# -------------------------
-@app.route("/initiate-payment", methods=["POST"])
-def initiate_payment():
-    try:
-        data = request.json
-        phone = data.get("phone")
-        amount = data.get("amount")
-
-        if not phone or not amount:
-            return jsonify({"error": "Missing phone or amount"}), 400
-
-        deposit_id = str(uuid.uuid4())
-        customer_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        payload = {
-            "depositId": deposit_id,
-            "amount": str(amount),
-            "currency": "ZMW",
-            "correspondent": "MTN_MOMO_ZMB",
-            "payer": {"type": "MSISDN", "address": {"value": phone}},
-            "customerTimestamp": customer_ts,
-            "statementDescription": "StudyCraftPay",
-            "metadata": [
-                {"fieldName": "orderId", "fieldValue": "ORD-" + deposit_id},
-                {"fieldName": "customerId", "fieldValue": phone, "isPII": True},
-            ],
-        }
-
-        headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
-        resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
-        result = {}
-
-        try:
-            result = resp.json()
-        except Exception:
-            logger.warning("Non-JSON response from PawaPay for initiate-payment: %s", resp.text)
-
-        # 🧾 Removed all transaction.db writes
-        # ✅ Keep logs and return response for visibility
-        logger.info(
-            "Payment initiated: depositId=%s | phone=%s | amount=%s | status=%s",
-            deposit_id, phone, amount, result.get("status", "PENDING")
-        )
-
-        # ✅ Return result directly without saving to DB
-        return jsonify({
-            "depositId": deposit_id,
-            **result
-        }), 200
-
-    except Exception:
-        logger.exception("Payment initiation error")
-        return jsonify({"error": "Internal server error"}), 500
-
+# # -------------------------
+# # ORIGINAL PAYMENT ENDPOINTS
+# # -------------------------
 # @app.route("/initiate-payment", methods=["POST"])
 # def initiate_payment():
 #     try:
 #         data = request.json
 #         phone = data.get("phone")
 #         amount = data.get("amount")
+
 #         if not phone or not amount:
 #             return jsonify({"error": "Missing phone or amount"}), 400
 
@@ -1021,178 +969,94 @@ def initiate_payment():
 #         headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
 #         resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
 #         result = {}
+
 #         try:
 #             result = resp.json()
 #         except Exception:
 #             logger.warning("Non-JSON response from PawaPay for initiate-payment: %s", resp.text)
 
-#         db = get_db()
-#         db.execute("""
-#             INSERT OR REPLACE INTO transactions
-#             (depositId,status,amount,currency,phoneNumber,provider,
-#              providerTransactionId,failureCode,failureMessage,metadata,received_at,type,user_id)
-#             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-#         """, (
-#             deposit_id,
-#             result.get("status", "PENDING"),
-#             float(amount),
-#             "ZMW",
-#             phone,
-#             None, None, None, None,
-#             json.dumps(payload["metadata"]),
-#             datetime.utcnow().isoformat(),
-#             "payment",
-#             None
-#         ))
-#         db.commit()
-#         logger.info("initiate-payment: inserted depositId=%s status=%s", deposit_id, result.get("status", "PENDING"))
-#         return jsonify({"depositId": deposit_id, **result}), 200
+#         # 🧾 Removed all transaction.db writes
+#         # ✅ Keep logs and return response for visibility
+#         logger.info(
+#             "Payment initiated: depositId=%s | phone=%s | amount=%s | status=%s",
+#             deposit_id, phone, amount, result.get("status", "PENDING")
+#         )
+
+#         # ✅ Return result directly without saving to DB
+#         return jsonify({
+#             "depositId": deposit_id,
+#             **result
+#         }), 200
 
 #     except Exception:
 #         logger.exception("Payment initiation error")
 #         return jsonify({"error": "Internal server error"}), 500
+
+@app.route("/initiate-payment", methods=["POST"])
+def initiate_payment():
+    try:
+        data = request.json
+        phone = data.get("phone")
+        amount = data.get("amount")
+        if not phone or not amount:
+            return jsonify({"error": "Missing phone or amount"}), 400
+
+        deposit_id = str(uuid.uuid4())
+        customer_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        payload = {
+            "depositId": deposit_id,
+            "amount": str(amount),
+            "currency": "ZMW",
+            "correspondent": "MTN_MOMO_ZMB",
+            "payer": {"type": "MSISDN", "address": {"value": phone}},
+            "customerTimestamp": customer_ts,
+            "statementDescription": "StudyCraftPay",
+            "metadata": [
+                {"fieldName": "orderId", "fieldValue": "ORD-" + deposit_id},
+                {"fieldName": "customerId", "fieldValue": phone, "isPII": True},
+            ],
+        }
+
+        headers = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
+        resp = requests.post(PAWAPAY_URL, json=payload, headers=headers)
+        result = {}
+        try:
+            result = resp.json()
+        except Exception:
+            logger.warning("Non-JSON response from PawaPay for initiate-payment: %s", resp.text)
+
+        db = get_db()
+        db.execute("""
+            INSERT OR REPLACE INTO transactions
+            (depositId,status,amount,currency,phoneNumber,provider,
+             providerTransactionId,failureCode,failureMessage,metadata,received_at,type,user_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            deposit_id,
+            result.get("status", "PENDING"),
+            float(amount),
+            "ZMW",
+            phone,
+            None, None, None, None,
+            json.dumps(payload["metadata"]),
+            datetime.utcnow().isoformat(),
+            "payment",
+            None
+        ))
+        db.commit()
+        logger.info("initiate-payment: inserted depositId=%s status=%s", deposit_id, result.get("status", "PENDING"))
+        return jsonify({"depositId": deposit_id, **result}), 200
+
+    except Exception:
+        logger.exception("Payment initiation error")
+        return jsonify({"error": "Internal server error"}), 500
 
 # -------------------------
 # CALLBACK RECEIVER (upsert-safe for deposits and payouts)
 # -------------------------
 
 #Test 2 callback 2
-@app.route("/callback/deposit", methods=["POST"])
-def deposit_callback():
-    try:
-        data = request.get_json(force=True)
-        print("📩 Full callback data:", data)
-
-        # Identify app type: StudyCraft vs eStack
-        metadata = data.get("metadata", {})
-        is_estack = isinstance(metadata, dict) and "userId" in metadata
-        is_studycraft = "payer" in data or "recipient" in data
-
-        # =====================================================
-        # 🔹 Case 1: eStack Application  ✅ (Unchanged)
-        # =====================================================
-        if is_estack:
-            deposit_id = data.get("depositId")
-            status = data.get("status", "PENDING").strip().upper()
-            amount = data.get("depositedAmount", 0)
-            user_id = metadata.get("userId", "unknown")
-
-            if not deposit_id:
-                return jsonify({"error": "Missing depositId"}), 400
-
-            name_of_transaction = f"ZMW{amount} | {user_id} | {deposit_id}"
-
-            db = sqlite3.connect("estack.db")
-            db.row_factory = sqlite3.Row
-            cur = db.cursor()
-
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS estack_transactions (
-                    name_of_transaction TEXT NOT NULL,
-                    status TEXT NOT NULL
-                )
-            """)
-
-            existing = cur.execute(
-                "SELECT name_of_transaction FROM estack_transactions WHERE name_of_transaction LIKE ?",
-                (f"%{deposit_id}%",)
-            ).fetchone()
-
-            if existing:
-                cur.execute(
-                    "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ?",
-                    (status, f"%{deposit_id}%")
-                )
-                print(f"🔄 Updated eStack transaction {deposit_id} → {status}")
-            else:
-                cur.execute(
-                    "INSERT INTO estack_transactions (name_of_transaction, status) VALUES (?, ?)",
-                    (name_of_transaction, status)
-                )
-                print(f"💾 Inserted new eStack transaction {deposit_id} → {status}")
-
-            db.commit()
-            db.close()
-
-            # ✅ Dropbox Sync (optional)
-            try:
-                from database_backup import upload_db
-                upload_db()
-            except Exception as sync_err:
-                print("⚠️ Dropbox sync skipped:", sync_err)
-
-            return jsonify({"success": True, "source": "eStack", "deposit_id": deposit_id, "status": status}), 200
-
-        # =====================================================
-        # 🔹 Case 2: StudyCraft Application (NO DB WRITES)
-        # =====================================================
-        elif is_studycraft:
-            deposit_id = data.get("depositId")
-            payout_id = data.get("payoutId")
-
-            if not deposit_id and not payout_id:
-                return jsonify({"error": "Missing depositId/payoutId"}), 400
-
-            txn_type = "payment" if deposit_id else "payout"
-            txn_id = deposit_id or payout_id
-            status = data.get("status")
-            amount = data.get("amount")
-            currency = data.get("currency")
-
-            if txn_type == "payment":
-                phone = data.get("payer", {}).get("accountDetails", {}).get("phoneNumber")
-                provider = data.get("payer", {}).get("accountDetails", {}).get("provider")
-            else:
-                phone = data.get("recipient", {}).get("accountDetails", {}).get("phoneNumber")
-                provider = data.get("recipient", {}).get("accountDetails", {}).get("provider")
-
-            provider_txn = data.get("providerTransactionId")
-            failure_code = data.get("failureReason", {}).get("failureCode")
-            failure_message = data.get("failureReason", {}).get("failureMessage")
-
-            user_id, loan_id = None, None
-            metadata_obj = metadata
-            if metadata_obj:
-                if isinstance(metadata_obj, dict):
-                    user_id = metadata_obj.get("userId")
-                    loan_id = metadata_obj.get("loanId")
-                elif isinstance(metadata_obj, list):
-                    for entry in metadata_obj:
-                        if isinstance(entry, dict):
-                            if entry.get("fieldName") == "userId":
-                                user_id = entry.get("fieldValue")
-                            if entry.get("fieldName") == "loanId":
-                                loan_id = entry.get("fieldValue")
-
-            # 🧾 Removed all transaction.db writes here.
-            # Still log info for debugging.
-            print("📘 StudyCraft callback received:")
-            print(f"   Type: {txn_type}")
-            print(f"   ID: {txn_id}")
-            print(f"   Status: {status}")
-            print(f"   Amount: {amount} {currency}")
-            print(f"   Phone: {phone} | Provider: {provider}")
-            print(f"   LoanID: {loan_id} | UserID: {user_id}")
-
-            # ✅ Return success response without touching transaction.db
-            return jsonify({
-                "received": True,
-                "source": "StudyCraft",
-                "txn_type": txn_type,
-                "txn_id": txn_id,
-                "status": status
-            }), 200
-
-        # =====================================================
-        # 🔹 Unknown callback structure
-        # =====================================================
-        else:
-            return jsonify({"error": "Unknown callback format"}), 400
-
-    except Exception as e:
-        print("❌ Unified callback error:", e)
-        return jsonify({"error": str(e)}), 500
-
 # @app.route("/callback/deposit", methods=["POST"])
 # def deposit_callback():
 #     try:
@@ -1205,7 +1069,7 @@ def deposit_callback():
 #         is_studycraft = "payer" in data or "recipient" in data
 
 #         # =====================================================
-#         # 🔹 Case 1: eStack Application
+#         # 🔹 Case 1: eStack Application  ✅ (Unchanged)
 #         # =====================================================
 #         if is_estack:
 #             deposit_id = data.get("depositId")
@@ -1250,7 +1114,7 @@ def deposit_callback():
 #             db.commit()
 #             db.close()
 
-#             # ✅ Dropbox Sync (optional if using persistence)
+#             # ✅ Dropbox Sync (optional)
 #             try:
 #                 from database_backup import upload_db
 #                 upload_db()
@@ -1260,7 +1124,7 @@ def deposit_callback():
 #             return jsonify({"success": True, "source": "eStack", "deposit_id": deposit_id, "status": status}), 200
 
 #         # =====================================================
-#         # 🔹 Case 2: StudyCraft Application
+#         # 🔹 Case 2: StudyCraft Application (NO DB WRITES)
 #         # =====================================================
 #         elif is_studycraft:
 #             deposit_id = data.get("depositId")
@@ -1300,80 +1164,24 @@ def deposit_callback():
 #                             if entry.get("fieldName") == "loanId":
 #                                 loan_id = entry.get("fieldValue")
 
-#             db = get_db()
-#             existing = db.execute(
-#                 "SELECT * FROM transactions WHERE depositId=? OR depositId=?",
-#                 (deposit_id, payout_id)
-#             ).fetchone()
+#             # 🧾 Removed all transaction.db writes here.
+#             # Still log info for debugging.
+#             print("📘 StudyCraft callback received:")
+#             print(f"   Type: {txn_type}")
+#             print(f"   ID: {txn_id}")
+#             print(f"   Status: {status}")
+#             print(f"   Amount: {amount} {currency}")
+#             print(f"   Phone: {phone} | Provider: {provider}")
+#             print(f"   LoanID: {loan_id} | UserID: {user_id}")
 
-#             now_iso = datetime.utcnow().isoformat()
-#             metadata_str = json.dumps(metadata_obj) if metadata_obj else None
-
-#             if existing:
-#                 db.execute("""
-#                     UPDATE transactions
-#                     SET status = COALESCE(?, status),
-#                         amount = COALESCE(?, amount),
-#                         currency = COALESCE(?, currency),
-#                         phoneNumber = COALESCE(?, phoneNumber),
-#                         provider = COALESCE(?, provider),
-#                         providerTransactionId = COALESCE(?, providerTransactionId),
-#                         failureCode = COALESCE(?, failureCode),
-#                         failureMessage = COALESCE(?, failureMessage),
-#                         metadata = COALESCE(?, metadata),
-#                         updated_at = ?,
-#                         user_id = COALESCE(?, user_id)
-#                     WHERE depositId = ? OR depositId = ?
-#                 """, (
-#                     status,
-#                     float(amount) if amount else None,
-#                     currency,
-#                     phone,
-#                     provider,
-#                     provider_txn,
-#                     failure_code,
-#                     failure_message,
-#                     metadata_str,
-#                     now_iso,
-#                     user_id,
-#                     deposit_id,
-#                     payout_id
-#                 ))
-#             else:
-#                 db.execute("""
-#                     INSERT INTO transactions
-#                     (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId,
-#                      failureCode, failureMessage, metadata, received_at, updated_at, type, user_id)
-#                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-#                 """, (
-#                     txn_id,
-#                     status,
-#                     float(amount) if amount else None,
-#                     currency,
-#                     phone,
-#                     provider,
-#                     provider_txn,
-#                     failure_code,
-#                     failure_message,
-#                     metadata_str,
-#                     now_iso,
-#                     now_iso,
-#                     txn_type,
-#                     user_id
-#                 ))
-
-#             # ✅ Handle loan repayment notification
-#             if txn_type == "payout" and loan_id and status in ("COMPLETED", "SUCCESS", "PAYMENT_COMPLETED"):
-#                 db.execute("UPDATE loans SET status=? WHERE loanId=?", (status, loan_id))
-#                 loan_row = db.execute("SELECT user_id FROM loans WHERE loanId=?", (loan_id,)).fetchone()
-#                 if loan_row and loan_row["user_id"]:
-#                     notify_investor(
-#                         loan_row["user_id"],
-#                         f"Loan {loan_id[:8]} has been successfully repaid."
-#                     )
-
-#             db.commit()
-#             return jsonify({"received": True, "source": "StudyCraft"}), 200
+#             # ✅ Return success response without touching transaction.db
+#             return jsonify({
+#                 "received": True,
+#                 "source": "StudyCraft",
+#                 "txn_type": txn_type,
+#                 "txn_id": txn_id,
+#                 "status": status
+#             }), 200
 
 #         # =====================================================
 #         # 🔹 Unknown callback structure
@@ -1384,6 +1192,198 @@ def deposit_callback():
 #     except Exception as e:
 #         print("❌ Unified callback error:", e)
 #         return jsonify({"error": str(e)}), 500
+
+@app.route("/callback/deposit", methods=["POST"])
+def deposit_callback():
+    try:
+        data = request.get_json(force=True)
+        print("📩 Full callback data:", data)
+
+        # Identify app type: StudyCraft vs eStack
+        metadata = data.get("metadata", {})
+        is_estack = isinstance(metadata, dict) and "userId" in metadata
+        is_studycraft = "payer" in data or "recipient" in data
+
+        # =====================================================
+        # 🔹 Case 1: eStack Application
+        # =====================================================
+        if is_estack:
+            deposit_id = data.get("depositId")
+            status = data.get("status", "PENDING").strip().upper()
+            amount = data.get("depositedAmount", 0)
+            user_id = metadata.get("userId", "unknown")
+
+            if not deposit_id:
+                return jsonify({"error": "Missing depositId"}), 400
+
+            name_of_transaction = f"ZMW{amount} | {user_id} | {deposit_id}"
+
+            db = sqlite3.connect("estack.db")
+            db.row_factory = sqlite3.Row
+            cur = db.cursor()
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS estack_transactions (
+                    name_of_transaction TEXT NOT NULL,
+                    status TEXT NOT NULL
+                )
+            """)
+
+            existing = cur.execute(
+                "SELECT name_of_transaction FROM estack_transactions WHERE name_of_transaction LIKE ?",
+                (f"%{deposit_id}%",)
+            ).fetchone()
+
+            if existing:
+                cur.execute(
+                    "UPDATE estack_transactions SET status = ? WHERE name_of_transaction LIKE ?",
+                    (status, f"%{deposit_id}%")
+                )
+                print(f"🔄 Updated eStack transaction {deposit_id} → {status}")
+            else:
+                cur.execute(
+                    "INSERT INTO estack_transactions (name_of_transaction, status) VALUES (?, ?)",
+                    (name_of_transaction, status)
+                )
+                print(f"💾 Inserted new eStack transaction {deposit_id} → {status}")
+
+            db.commit()
+            db.close()
+
+            # ✅ Dropbox Sync (optional if using persistence)
+            try:
+                from database_backup import upload_db
+                upload_db()
+            except Exception as sync_err:
+                print("⚠️ Dropbox sync skipped:", sync_err)
+
+            return jsonify({"success": True, "source": "eStack", "deposit_id": deposit_id, "status": status}), 200
+
+        # =====================================================
+        # 🔹 Case 2: StudyCraft Application
+        # =====================================================
+        elif is_studycraft:
+            deposit_id = data.get("depositId")
+            payout_id = data.get("payoutId")
+
+            if not deposit_id and not payout_id:
+                return jsonify({"error": "Missing depositId/payoutId"}), 400
+
+            txn_type = "payment" if deposit_id else "payout"
+            txn_id = deposit_id or payout_id
+            status = data.get("status")
+            amount = data.get("amount")
+            currency = data.get("currency")
+
+            if txn_type == "payment":
+                phone = data.get("payer", {}).get("accountDetails", {}).get("phoneNumber")
+                provider = data.get("payer", {}).get("accountDetails", {}).get("provider")
+            else:
+                phone = data.get("recipient", {}).get("accountDetails", {}).get("phoneNumber")
+                provider = data.get("recipient", {}).get("accountDetails", {}).get("provider")
+
+            provider_txn = data.get("providerTransactionId")
+            failure_code = data.get("failureReason", {}).get("failureCode")
+            failure_message = data.get("failureReason", {}).get("failureMessage")
+
+            user_id, loan_id = None, None
+            metadata_obj = metadata
+            if metadata_obj:
+                if isinstance(metadata_obj, dict):
+                    user_id = metadata_obj.get("userId")
+                    loan_id = metadata_obj.get("loanId")
+                elif isinstance(metadata_obj, list):
+                    for entry in metadata_obj:
+                        if isinstance(entry, dict):
+                            if entry.get("fieldName") == "userId":
+                                user_id = entry.get("fieldValue")
+                            if entry.get("fieldName") == "loanId":
+                                loan_id = entry.get("fieldValue")
+
+            db = get_db()
+            existing = db.execute(
+                "SELECT * FROM transactions WHERE depositId=? OR depositId=?",
+                (deposit_id, payout_id)
+            ).fetchone()
+
+            now_iso = datetime.utcnow().isoformat()
+            metadata_str = json.dumps(metadata_obj) if metadata_obj else None
+
+            if existing:
+                db.execute("""
+                    UPDATE transactions
+                    SET status = COALESCE(?, status),
+                        amount = COALESCE(?, amount),
+                        currency = COALESCE(?, currency),
+                        phoneNumber = COALESCE(?, phoneNumber),
+                        provider = COALESCE(?, provider),
+                        providerTransactionId = COALESCE(?, providerTransactionId),
+                        failureCode = COALESCE(?, failureCode),
+                        failureMessage = COALESCE(?, failureMessage),
+                        metadata = COALESCE(?, metadata),
+                        updated_at = ?,
+                        user_id = COALESCE(?, user_id)
+                    WHERE depositId = ? OR depositId = ?
+                """, (
+                    status,
+                    float(amount) if amount else None,
+                    currency,
+                    phone,
+                    provider,
+                    provider_txn,
+                    failure_code,
+                    failure_message,
+                    metadata_str,
+                    now_iso,
+                    user_id,
+                    deposit_id,
+                    payout_id
+                ))
+            else:
+                db.execute("""
+                    INSERT INTO transactions
+                    (depositId, status, amount, currency, phoneNumber, provider, providerTransactionId,
+                     failureCode, failureMessage, metadata, received_at, updated_at, type, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    txn_id,
+                    status,
+                    float(amount) if amount else None,
+                    currency,
+                    phone,
+                    provider,
+                    provider_txn,
+                    failure_code,
+                    failure_message,
+                    metadata_str,
+                    now_iso,
+                    now_iso,
+                    txn_type,
+                    user_id
+                ))
+
+            # ✅ Handle loan repayment notification
+            if txn_type == "payout" and loan_id and status in ("COMPLETED", "SUCCESS", "PAYMENT_COMPLETED"):
+                db.execute("UPDATE loans SET status=? WHERE loanId=?", (status, loan_id))
+                loan_row = db.execute("SELECT user_id FROM loans WHERE loanId=?", (loan_id,)).fetchone()
+                if loan_row and loan_row["user_id"]:
+                    notify_investor(
+                        loan_row["user_id"],
+                        f"Loan {loan_id[:8]} has been successfully repaid."
+                    )
+
+            db.commit()
+            return jsonify({"received": True, "source": "StudyCraft"}), 200
+
+        # =====================================================
+        # 🔹 Unknown callback structure
+        # =====================================================
+        else:
+            return jsonify({"error": "Unknown callback format"}), 400
+
+    except Exception as e:
+        print("❌ Unified callback error:", e)
+        return jsonify({"error": str(e)}), 500
 
 # -------------------------
 # DEPOSIT STATUS / TRANSACTION LOOKUP
@@ -2544,41 +2544,3 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
