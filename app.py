@@ -304,7 +304,7 @@ with app.app_context():
     init_loans_table()
 
 def migrate_loans_table():
-    db = get_db()
+    db = get_db_sc()
     existing_columns = [col["name"] for col in db.execute("PRAGMA table_info(loans)").fetchall()]
 
     # ✅ Ensure disbursed_at column exists
@@ -318,7 +318,7 @@ def migrate_loans_table():
 
 # ✅ run migrations safely once app starts
 with app.app_context():
-    init_db()
+    init_db_sc()
     migrate_loans_table()
 
 
@@ -2546,5 +2546,6 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
