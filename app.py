@@ -34,6 +34,8 @@ API_MODE = os.getenv("API_MODE", "sandbox")
 SANDBOX_API_TOKEN = os.getenv("SANDBOX_API_TOKEN")
 LIVE_API_TOKEN = os.getenv("LIVE_API_TOKEN")
 
+DATABASE_sc = os.path.join(os.path.dirname(__file__), "transactions.db")
+
 API_TOKEN = LIVE_API_TOKEN if API_MODE == "live" else SANDBOX_API_TOKEN
 PAWAPAY_URL = (
     "https://api.pawapay.io/deposits"
@@ -86,12 +88,12 @@ def notify_investor(user_id, message):
     except Exception as e:
         logger.error(f"❌ Failed to notify investor {user_id}: {e}")
 
-def init_db():
+def init_db_sc():
     """
     Create the transactions and loans tables if missing and safely add any missing columns.
     Also run a small backfill to populate 'type' and 'user_id' from metadata where possible.
     """
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE_sc)
     cur = conn.cursor()
 
     # Create wallets table if not exists
@@ -260,16 +262,16 @@ def init_db():
 
 # ✅ Run safely within the Flask app context
 with app.app_context():
-    init_db()
+    init_db_sc()
 
-def get_db():
+def get_db_sc():
     """
     Return a DB connection scoped to the Flask request context.
     Row factory is sqlite3.Row for dict-like rows.
     """
     db = getattr(g, "_database", None)
     if db is None:
-        db = g._database = sqlite3.connect(DATABASE)
+        db = g._database = sqlite3.connect(DATABASE_sc)
         db.row_factory = sqlite3.Row
     return db
 
@@ -1025,7 +1027,7 @@ def initiate_payment():
         except Exception:
             logger.warning("Non-JSON response from PawaPay for initiate-payment: %s", resp.text)
 
-        db = get_db()
+        db = get_db_sc()
         db.execute("""
             INSERT OR REPLACE INTO transactions
             (depositId,status,amount,currency,phoneNumber,provider,
@@ -1299,7 +1301,7 @@ def deposit_callback():
                             if entry.get("fieldName") == "loanId":
                                 loan_id = entry.get("fieldValue")
 
-            db = get_db()
+            db = get_db_sc()
             existing = db.execute(
                 "SELECT * FROM transactions WHERE depositId=? OR depositId=?",
                 (deposit_id, payout_id)
@@ -1556,7 +1558,7 @@ def deposit_callback():
 # -------------------------
 @app.route("/debug/transactions", methods=["GET"])
 def debug_transactions():
-    db = get_db()
+    db = get_db_sc()
     rows = db.execute("SELECT * FROM transactions ORDER BY received_at DESC").fetchall()
     results = []
     for row in rows:
@@ -1602,7 +1604,7 @@ def debug_transactions():
 @app.route("/api/loans/disburse/<loan_id>", methods=["POST"])
 def disburse_loan(loan_id):
     try:
-        db = get_db()  # ✅ Get the database connection
+        db = get_db_sc()  # ✅ Get the database connection
         data = request.get_json() or {}
         logger.info(f"Disbursing loan {loan_id} with data: {data}")
 
@@ -1747,7 +1749,7 @@ def disburse_loan(loan_id):
 @app.route("/api/loans/reject/<loan_id>", methods=["POST"])
 def reject_loan(loan_id):
     admin_id = request.json.get("admin_id", "admin_default")
-    db = get_db()
+    db = get_db_sc()
     loan = db.execute("SELECT * FROM loans WHERE loanId=?", (loan_id,)).fetchone()
     if not loan:
         return jsonify({"error": "Loan not found"}), 404
@@ -1777,6 +1779,7 @@ def get_notifications(user_id):
 if __name__ == "__main__":
     with app.app_context():
         init_db()
+        init_db_sc()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
@@ -2543,4 +2546,5 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
