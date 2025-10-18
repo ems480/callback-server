@@ -2162,7 +2162,7 @@ def get_db():
 
 @app.route("/deposit_status/<deposit_id>")
 def deposit_status(deposit_id):
-    db = get_db()
+    db = get_db_sc()
     row = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
     if not row:
         return jsonify({"status": None, "message": "Deposit not found"}), 404
@@ -2176,7 +2176,7 @@ def deposit_status(deposit_id):
 
 @app.route("/transactions/<deposit_id>")
 def get_transaction(deposit_id):
-    db = get_db()
+    db = get_db_sc()
     row = db.execute("SELECT * FROM transactions WHERE depositId=?", (deposit_id,)).fetchone()
     if not row:
         return jsonify({"error": "not found"}), 404
@@ -2546,6 +2546,7 @@ def get_pending_loans():
 #         init_db()
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port)
+
 
 
 
